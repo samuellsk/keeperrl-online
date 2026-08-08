@@ -43,3 +43,10 @@ std::string rarHashDataFree(const std::string& dataFreePath);
 // BEFORE touching disk and returns false on a bad one, so a failed download cannot leave a broken install.
 std::string rarBundleDataFree(const std::string& dataFreePath);
 bool rarUnbundleDataFree(const std::string& dataFreePath, const std::string& bundle);
+
+// Write a release manifest: "<relative/path>\t<sha256>\t<bytes>" per line, sorted. PLAIN TEXT on purpose --
+// keeper_updater must keep working across game versions, so it cannot share a binary format with the game it
+// updates. protectedOnly = just data_free/game_config + data_free/ui (the tamper-check subset, matching
+// rarHashDataFree); otherwise every file under rootPath, which is what repairing an install needs.
+// Returns the number of files written.
+int rarWriteManifest(const std::string& rootPath, const std::string& outFilePath, bool protectedOnly);

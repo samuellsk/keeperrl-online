@@ -166,6 +166,7 @@ static po::parser getCommandLineFlags() {
   flags["rar_lockstep_gametest"].type(po::string).description("[pvp] RAR PvP: run the REAL sim through the netcode, arg 'save turns relayHost relayPort role outfile'; run twice (role 0/1) against a relay + diff");
   flags["rar_lockstep_battle"].type(po::string).description("[pvp] RAR PvP: play a live lockstep battle in a window, arg 'defenderSave invaderSave relayHost relayPort role' (role 0=defender, 1=invader)");
   flags["rar_siege_test"].description("[diag] RAR online: self-test the owner-returns-during-invasion (siege) flow, then exit");
+  flags["rar_gen_manifest"].type(po::string).description("[server] Write a release manifest for keeper_updater, arg '<installDir> <outFile> [protected]'");
   flags["rar_gen_worldmap"].type(po::string).description("[server] RAR online: which world-map layout --rar_gen_world builds (world_maps.txt id, or any random_layouts.txt name -- mods included)");
   flags["rar_gen_seed"].type(po::i32).description("[server] RAR online: terrain seed for --rar_gen_world (from --gen_preview) -> reproducible map");
   flags["rar_gen_world"].type(po::string).description("[server] RAR online: generate the canonical world to the given file and exit");
@@ -483,6 +484,20 @@ static int keeperMain(po::parser& commandLineFlags) {
         &allUnlocked, nullptr, nullptr, 0, modVersion);
     loop.runRarServerFull(commandLineFlags["rar_server"].get().i32);
     exit(0);
+  }
+  if (commandLineFlags["rar_gen_manifest"].was_set()) {
+    // Release step: fingerprint an install so keeper_updater can verify/repair it. Plain text, no game
+    // content loaded -- this runs against an unzipped release folder, not against the running game.
+    auto toks = split(commandLineFlags["rar_gen_manifest"].get().string, {' '});
+    if (toks.size() < 2) {
+      std::cout << "usage: --rar_gen_manifest '<installDir> <outFile> [protected]'\n";
+      exit(1);
+    }
+    bool protectedOnly = toks.size() > 2 && toks[2] == "protected";
+    int n = rarWriteManifest(toks[0], toks[1], protectedOnly);
+    std::cout << "[manifest] " << n << " file(s) -> " << toks[1]
+        << (protectedOnly ? "  (data_free rule files only)" : "  (whole install)") << "\n";
+    exit(n > 0 ? 0 : 1);
   }
   if (commandLineFlags["rar_gen_world"].was_set()) {
     // RAR: gen MUST write into the same server/ directory that --rar_server reads from (the server chdir's

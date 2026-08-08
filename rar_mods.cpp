@@ -167,3 +167,44 @@ bool rarUnbundleDataFree(const string& dataFreePath, const string& bundle) {
   }
   return true;
 }
+
+// ---- release manifest -----------------------------------------------------------------------------------
+// A PLAIN TEXT list of every file in an install, one per line:
+//
+//     <relative/path><TAB><sha256><TAB><bytes>
+//
+// Deliberately not the cereal bundle the game uses. keeper_updater has to keep working across game versions,
+// including ones whose serialization changed, so it must not share a binary format with the thing it updates.
+// Text also means the manifest can be read by anything -- a script, a browser, a human diffing two releases.
+//
+// `protectedOnly` writes just the rule-bearing subset (data_free/game_config + data_free/ui), i.e. exactly
+// what rarHashDataFree covers. That is the tamper-check list. The full form additionally covers the binary,
+// the DLLs and the rest, which is what a repair-the-install update needs.
+static void collectAll(const DirectoryPath& dir, const string& prefix, vector<pair<string, string>>& out) {
+  for (auto& f : dir.getFiles())
+    if (auto c = readFileBinary(f))
+      out.push_back(make_pair(prefix + f.getFileName(), *c));
+  for (auto& sub : dir.getSubDirs())
+    collectAll(dir.subdirectory(sub), prefix + sub + "/", out);
+}
+
+int rarWriteManifest(const string& rootPath, const string& outFilePath, bool protectedOnly) {
+  DirectoryPath root(rootPath);
+  if (!root.exists())
+    return 0;
+  vector<pair<string, string>> files;
+  if (protectedOnly) {
+    auto df = root.subdirectory("data_free");
+    for (auto& sub : {"game_config", "ui"}) {
+      auto dir = df.subdirectory(sub);
+      if (dir.exists())
+        collectAll(dir, string("data_free/") + sub + "/", files);
+    }
+  } else
+    collectAll(root, "", files);
+  std::sort(files.begin(), files.end());
+  std::ofstream out(outFilePath);
+  for (auto& f : files)
+    out << f.first << "\t" << rarSha256Hex(f.second) << "\t" << f.second.size() << "\n";
+  return (int) files.size();
+}
