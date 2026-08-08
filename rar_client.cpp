@@ -971,6 +971,28 @@ bool rarOwnsSave(const std::string& gameId) {
 // doesn't know about is stale (deleted keeper/account, or another PC's) -- loading it would resurrect the
 // keeper on the next save AND drag its own out-of-date world map back in. Returns false if the server can't
 // be asked, in which case callers must FAIL CLOSED (show nothing) rather than fall back to local state.
+// RAR data protection: what the server we are connecting to says its rule files hash to, and the files
+// themselves. Empty hash = an older server that does not publish one; treat that as "no opinion" and leave
+// the client's content alone rather than wiping it.
+std::string rarFetchServerDataFreeHash() {
+  std::string body;
+  long code = 0;
+  if (!get("/data_free_hash", body, code) || code != 200)
+    return "";
+  while (!body.empty() && (body.back() == '\n' || body.back() == '\r' || body.back() == ' '))
+    body.pop_back();
+  return body;
+}
+
+bool rarFetchServerDataFree(std::string& out) {
+  long code = 0;
+  if (!get("/data_free", out, code) || code != 200) {
+    g_lastError = "couldn't download data_free from the server";
+    return false;
+  }
+  return !out.empty();
+}
+
 bool rarListKeepers(std::set<std::string>& out) {
   out.clear();
   std::string body;

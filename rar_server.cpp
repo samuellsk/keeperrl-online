@@ -181,6 +181,7 @@ std::map<std::string, std::time_t> g_siegeProtected;
 // Clients send theirs at login; a mismatch means their rule files differ from ours (edited, stale, or
 // a different build). Recorded per account so it is visible WHO is running altered content.
 std::string g_dataFreeHash;
+std::string g_dataFreeBundle;   // served verbatim to clients that ask; the hash above is its SHA-256
 std::map<std::string, std::string> g_clientDataFree;   // login -> last hash the client reported
 std::map<std::string, bool> g_dataFreeBad;             // login -> true if it did not match ours
  // gameId -> protected until
@@ -1331,7 +1332,8 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
   // a mod in mods/ and restarts the server; no separate --rar_gen_world step is needed to push it. Bundling
   // is byte-identical to the client's, so hash-checks line up.
   {
-  g_dataFreeHash = rarHashDataFree("../data_free");   // same relative base as ../mods (we chdir into server/)
+  g_dataFreeBundle = rarBundleDataFree("../data_free"); // same relative base as ../mods (we chdir into server/)
+  g_dataFreeHash = g_dataFreeBundle.empty() ? "" : rarSha256Hex(g_dataFreeBundle);   // same relative base as ../mods (we chdir into server/)
   std::printf("RAR server: data_free hash %s\n",
       g_dataFreeHash.empty() ? "UNAVAILABLE (../data_free not found -- tamper checks disabled)"
                              : g_dataFreeHash.c_str());
@@ -1530,6 +1532,17 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
   });
 
   // Mod manifest (step 7): "modname\thash" lines, written by --rar_gen_world. Empty if vanilla.
+  // RAR data protection. A client checks GitHub first (the release it installed), then asks the server it is
+  // connecting to. If the server's content differs, the SERVER wins -- that is what lets someone run their own
+  // server with their own rules and have clients follow it, instead of being pinned to the public release.
+  svr.Get("/data_free_hash", [](const httplib::Request&, httplib::Response& res) {
+    res.set_content(g_dataFreeHash, "text/plain");
+  });
+  svr.Get("/data_free", [](const httplib::Request&, httplib::Response& res) {
+    if (g_dataFreeBundle.empty()) { res.status = 404; res.set_content("none", "text/plain"); return; }
+    res.set_content(g_dataFreeBundle, "application/octet-stream");
+  });
+
   svr.Get("/mods", [](const httplib::Request&, httplib::Response& res) {
     std::ifstream in("rar_mods.txt");
     if (!in) { res.set_content("", "text/plain"); return; }

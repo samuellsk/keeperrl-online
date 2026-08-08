@@ -36,3 +36,10 @@ int rarPublishMods(const std::string& modsDirPath, const std::string& outDirPath
 // Identical code runs on the client and on the Linux server, so the two agree byte for byte -- the same
 // property the mod hashes rely on. dataFreePath = the data_free folder itself. Returns "" if it is missing.
 std::string rarHashDataFree(const std::string& dataFreePath);
+
+// The same content as an unpackable blob, and the inverse. rarHashDataFree is the SHA-256 OF this bundle, so
+// what a client downloads is exactly what it verifies. rarUnbundleDataFree overwrites game_config/ and ui/
+// wholesale (deleting files the bundle lacks) and leaves the rest of data_free alone; it validates the blob
+// BEFORE touching disk and returns false on a bad one, so a failed download cannot leave a broken install.
+std::string rarBundleDataFree(const std::string& dataFreePath);
+bool rarUnbundleDataFree(const std::string& dataFreePath, const std::string& bundle);

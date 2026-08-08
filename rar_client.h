@@ -195,3 +195,8 @@ int rarSiegeSelfTest(const std::string& gameId);
 // RAR data protection: hand the client its own data_free hash (rarHashDataFree) once at startup; it is
 // sent with each login so the server can flag clients whose rule files differ from its own.
 void rarSetDataFreeHash(const std::string&);
+
+// RAR data protection: the connecting server's data_free hash ("" if it publishes none), and the bundle
+// itself. The server overrides GitHub deliberately, so a private server can ship its own rules.
+std::string rarFetchServerDataFreeHash();
+bool rarFetchServerDataFree(std::string& out);
