@@ -14,4 +14,12 @@ If you crash, or close the game with the X instead of saving and
 exiting, your account stays locked for 5 minutes. You will not be
 able to log back in until it clears.
 
+CHEATS
+Your accounts should have in the left menu a way to spawn a minion
+of your choosing or an item in quantities. Use them however you want
+This is a closed / public playtest. Your dungeons will be removed in
+the next version , they might not be compatible. If I would keep the
+compatibility when going from one version to another they would be
+kept but if situation requires it , they will be removed. Sorry.
+
 Always leave through "save and exit" if you can.
