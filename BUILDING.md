@@ -10,7 +10,7 @@ cd keeperrl
 ```
 
 `build-ubuntu.sh` installs the dependencies, creates the build directories and compiles.
-Expect **10–25 minutes** on a typical machine.
+Expect **10-25 minutes** on a typical machine.
 
 **Run the game from the repository directory.** The game reads `appconfig.txt`,
 `data_free/` and `mods/` from the *current working directory*, not from wherever the
@@ -39,7 +39,7 @@ sudo apt install clang make git pkg-config \
 | **openssl** (`-lssl -lcrypto`) | TLS, HMAC and SHA-256 for the online layer |
 | **liblzma** (`-llzma`) | compression for the dungeon transport |
 
-The last two are additions of this fork — upstream KeeperRL links only `-lssl`.
+The last two are additions of this fork - upstream KeeperRL links only `-lssl`.
 
 ## Building by hand
 
@@ -65,7 +65,7 @@ Build output goes to `obj-opt/` (`obj/` for debug). `make clean` removes it.
 
 ## Artwork is not included
 
-This repository contains **no KeeperRL artwork, music or sound** — those are commercial
+This repository contains **no KeeperRL artwork, music or sound** - those are commercial
 assets and not redistributable. Without them the game runs in **ASCII**, which the engine
 falls back to automatically when the `data` folder is absent.
 
@@ -88,13 +88,13 @@ keeperrl/
 |---|---|
 | `server_list_url` | public list of servers, fetched at login; supplies the **address only** |
 | `server_url` | fallback used when that list cannot be reached |
-| `server_cert_pin` | pinned public key of the server certificate — a wrong server fails the check |
+| `server_cert_pin` | pinned public key of the server certificate - a wrong server fails the check |
 | `server_psk` | pre-shared key for the pre-TLS knock |
 
 The address comes from the list; the pin and PSK always come from this file, so a
 tampered list cannot redirect anyone to another server.
 
-`server_url` defaults to `https://localhost:38552` — useful if you run your own server.
+`server_url` defaults to `https://localhost:38552` - useful if you run your own server.
 It must not be empty: an empty value would leave the game with no server at all.
 
 ## Running your own server

@@ -191,3 +191,7 @@ int rarClientSelfTest();
 // Drives the SIEGE state machine (reserve -> owner knocks -> countdown -> evict -> release -> clear)
 // against a live server, since reproducing it for real needs two players and a 60s window.
 int rarSiegeSelfTest(const std::string& gameId);
+
+// RAR data protection: hand the client its own data_free hash (rarHashDataFree) once at startup; it is
+// sent with each login so the server can flag clients whose rule files differ from its own.
+void rarSetDataFreeHash(const std::string&);

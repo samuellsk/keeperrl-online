@@ -27,3 +27,12 @@ std::vector<std::string> rarModsInLoadOrder(const std::string& modsDirPath);
 // Content-free: the --rar_server calls this at startup to auto-publish whatever mods sit in the standard
 // mods/ folder, so no separate --rar_gen_world step is needed just to push a mod. Returns the mod count.
 int rarPublishMods(const std::string& modsDirPath, const std::string& outDirPath);
+
+// RAR data protection: one SHA-256 over the RULE-BEARING part of data_free -- game_config/ and ui/, every
+// file, recursively, in a deterministic order, read as raw bytes. images/ and the loose root files are
+// deliberately excluded: they are art and platform glue, cannot change what the game DOES, and would make
+// the hash differ between builds for no reason.
+//
+// Identical code runs on the client and on the Linux server, so the two agree byte for byte -- the same
+// property the mod hashes rely on. dataFreePath = the data_free folder itself. Returns "" if it is missing.
+std::string rarHashDataFree(const std::string& dataFreePath);

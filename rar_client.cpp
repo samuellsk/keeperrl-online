@@ -42,6 +42,10 @@ std::string g_activeTempClaim;                 // gameId of a temp claim not yet
 // a different computer is rejected). The session login/password are captured on a successful login and
 // used by the heartbeat thread -- kept separate from g_login/g_password, which rarLoginFlow clears on retry.
 std::string g_sessionToken;
+// RAR data protection: this client's data_free hash, set once at startup by main.cpp (which knows the data
+// paths) and sent with every login so the server can tell whether our rule files match its own.
+std::string g_dataFreeHash;
+
 std::string g_sessionLogin;
 std::string g_sessionPassword;
 std::atomic<bool> g_sessionActive{false};
@@ -230,6 +234,8 @@ void rarInit(const std::string& serverUrl, const std::string& login, const std::
 }
 
 bool rarConfigured() { return !g_serverUrl.empty(); }
+void rarSetDataFreeHash(const std::string& h) { g_dataFreeHash = h; }
+
 void rarSetCredentials(const std::string& login, const std::string& password) {
   g_login = login;
   g_password = password;
@@ -285,7 +291,7 @@ bool rarIsDeveloper() {
 RarLoginResult rarLoginCheck() {
   std::string out; long code = 0;
   g_isDeveloper = false;              // fail closed until the server says otherwise
-  if (!postCode("/login", g_login + "\n" + g_password + "\n" + g_sessionToken, out, code))
+  if (!postCode("/login", g_login + "\n" + g_password + "\n" + g_sessionToken + "\n" + g_dataFreeHash, out, code))
     return RarLoginResult::Unreachable; // network error / server down
   if (code == 200) {
     // reply is "ok" (older server) or "ok<newline><role>"

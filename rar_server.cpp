@@ -175,7 +175,15 @@ std::map<std::string, std::time_t> g_ownerReturn;  // gameId -> deadline the inv
 std::time_t OWNER_RETURN_GRACE = 60;               // 1 min to get out voluntarily
 // After a siege the returning owner is protected from ANY new invasion for a while, so he can't be
 // perma-locked out of his own dungeon by attackers queueing up one after another.
-std::map<std::string, std::time_t> g_siegeProtected; // gameId -> protected until
+std::map<std::string, std::time_t> g_siegeProtected;
+// RAR data protection: SHA-256 over data_free/game_config + data_free/ui, computed at startup from the
+// SERVER's own copy. That is the authority -- it is the content the shared world was generated with.
+// Clients send theirs at login; a mismatch means their rule files differ from ours (edited, stale, or
+// a different build). Recorded per account so it is visible WHO is running altered content.
+std::string g_dataFreeHash;
+std::map<std::string, std::string> g_clientDataFree;   // login -> last hash the client reported
+std::map<std::string, bool> g_dataFreeBad;             // login -> true if it did not match ours
+ // gameId -> protected until
 std::time_t SIEGE_PROTECT_TTL = 1800;              // 30 min
 // 4c reconcile: gameIds whose server dungeon was damaged by an INVADER since the owner last saved.
 // Set on an invader's writeback, cleared on the owner's own re-save. Persisted so the flag survives a
@@ -1323,6 +1331,11 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
   // a mod in mods/ and restarts the server; no separate --rar_gen_world step is needed to push it. Bundling
   // is byte-identical to the client's, so hash-checks line up.
   {
+  g_dataFreeHash = rarHashDataFree("../data_free");   // same relative base as ../mods (we chdir into server/)
+  std::printf("RAR server: data_free hash %s\n",
+      g_dataFreeHash.empty() ? "UNAVAILABLE (../data_free not found -- tamper checks disabled)"
+                             : g_dataFreeHash.c_str());
+  std::fflush(stdout);
     int n = rarPublishMods("../mods", ".");
     std::printf("RAR server: published %d mod(s) from ../mods -> rar_mods/ + rar_mods.txt\n", n);
     std::fflush(stdout);
@@ -1577,7 +1590,19 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
       res.status = 409; res.set_content("already logged in", "text/plain"); return;
     }
     g_sessions[p[0]] = SessionInfo{ token, std::time(nullptr) }; // acquire the single-session lock
-    std::printf("[login] '%s' from %s (%s)\n", p[0].c_str(), req.remote_addr.c_str(), roleOf(p[0]).c_str());
+    // 4th line (optional, older clients omit it) = the client's data_free hash.
+    std::string clientHash = p.size() > 3 ? p[3] : "";
+    bool bad = !clientHash.empty() && !g_dataFreeHash.empty() && clientHash != g_dataFreeHash;
+    if (!clientHash.empty()) {
+      g_clientDataFree[p[0]] = clientHash;
+      g_dataFreeBad[p[0]] = bad;
+    }
+    std::printf("[login] '%s' from %s (%s) data_free=%s\n", p[0].c_str(), req.remote_addr.c_str(),
+        roleOf(p[0]).c_str(),
+        clientHash.empty() ? "not-reported" : (bad ? "MISMATCH" : "ok"));
+    if (bad)
+      std::printf("[data_free] '%s' MISMATCH client=%s server=%s\n", p[0].c_str(),
+          clientHash.substr(0, 16).c_str(), g_dataFreeHash.substr(0, 16).c_str());
     std::fflush(stdout);
     // "ok<newline><role>". An older client reads only the first token, so this stays backward compatible.
     res.set_content("ok\n" + roleOf(p[0]), "text/plain");

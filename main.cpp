@@ -74,6 +74,7 @@
 #include "rar_server.h"
 #include "rar_lockstep_net.h"
 #include "rar_client.h"
+#include "rar_mods.h"   // rarHashDataFree: our data_free fingerprint, reported at login
 
 #ifdef USE_STEAMWORKS
 #include "steam_base.h"
@@ -416,6 +417,10 @@ static int keeperMain(po::parser& commandLineFlags) {
       appConfig.getMaybe<string>("server_psk").value_or(""),
       appConfig.getMaybe<string>("server_list_url").value_or(""));
   rarSetSaveRegistry(userPath.file("rar_saves.txt").getPath());
+  // RAR data protection: hash our own rule files once here (paths are known, nothing has been loaded yet) and
+  // hand it to the client layer, which sends it with every login. The server compares against its own copy and
+  // records who is running altered content. Purely informational to us -- the server decides what to do.
+  rarSetDataFreeHash(rarHashDataFree(freeDataPath.getPath()));
   if (commandLineFlags["rar_client_test"].was_set())
     return rarClientSelfTest();
   if (commandLineFlags["rar_lockstep_nettest"].was_set())
