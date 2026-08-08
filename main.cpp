@@ -175,6 +175,7 @@ static po::parser getCommandLineFlags() {
   flags["rar_gen_world"].type(po::string).description("[server] RAR online: generate the canonical world to the given file and exit");
   flags["rar_world_selftest"].type(po::string).description("[diag] RAR online: deserialize a world file and print a summary, then exit");
   flags["rar_repair_villains"].type(po::string).description("[server] RAR online: regenerate any missing villain blobs for the given campaign file (in server/), then exit");
+  flags["rar_regen_villains"].type(po::string).description("[server] RAR online: rewrite villain interiors in the CURRENT save format, roster/positions kept; arg 'placed', 'spares', 'all', or one tile 'x_y' / villain id");
   flags["map_editor"].type(po::string).description("[layout] GRAPHICAL layout/world-map previewer: pick a layout, set size, reroll, read off the seed. Arg optional");
   flags["gen_preview"].type(po::string).description("[layout] Alias of --map_editor (older name)");
   flags["rar_mod_selftest"].type(po::string).description("[diag] RAR online: bundle+reinstall a mod dir and verify the hash round-trip, then exit");
@@ -182,6 +183,7 @@ static po::parser getCommandLineFlags() {
   flags["dump_workshops"].type(po::string).description("[diag] Print merged workshop recipes (active mods included) and exit; arg = group name or empty for all");
   flags["rar_compress_test"].type(po::string).description("[diag] RAR online: gzip<->lzma transcode round-trip on a .sit/.dat, then exit");
   flags["rar_load_dungeon_test"].type(po::string).description("[diag] RAR online: download+load a cached dungeon model by gameId, then exit");
+  flags["rar_villain_load_test"].type(po::string).description("[diag] RAR online: download+load the villain map at tile 'x_y' and report which step fails, then exit");
   flags["rar_keeper_load_test"].type(po::string).description("[diag] RAR online: download a KEEPER blob by gameId and try to load it as a full game (what the load menu does), then exit");
   flags["rar_lockstep_selftest"].type(po::string).description("[pvp] RAR PvP: twin-sim determinism check on a save file, arg 'save.kep [turns]', then exit");
   flags["rar_lockstep_dump"].type(po::string).description("[pvp] RAR PvP: one sim run -> fingerprint file, arg 'save.kep turns seed outfile'; run twice + diff for cross-process determinism");
@@ -538,8 +540,10 @@ static int keeperMain(po::parser& commandLineFlags) {
     if (_chdir("server") != 0)
       std::cerr << "rar_gen_world: couldn't enter ./server directory\n";
 #endif
+    // saveVersion, not 0: every villain blob carries it in its header, and a blob stamped with the version that
+    // wrote it is the only cheap way to tell a current interior from one left behind by an older format.
     MainLoop loop(nullptr, nullptr, nullptr, absPaid, absFree, absUser, absMods, &options, nullptr, nullptr, nullptr,
-        &allUnlocked, nullptr, nullptr, 0, modVersion);
+        &allUnlocked, nullptr, nullptr, saveVersion, modVersion);
     optional<int> genSeed;
     if (commandLineFlags["rar_gen_seed"].was_set())
       genSeed = commandLineFlags["rar_gen_seed"].get().i32;
@@ -553,6 +557,21 @@ static int keeperMain(po::parser& commandLineFlags) {
     MainLoop loop(nullptr, nullptr, nullptr, paidDataPath, freeDataPath, userPath, modsDir, &options, nullptr, nullptr, nullptr,
         &allUnlocked, nullptr, nullptr, 0, modVersion);
     loop.testServerWorld(commandLineFlags["rar_world_selftest"].get().string);
+    exit(0);
+  }
+  if (commandLineFlags["rar_regen_villains"].was_set()) {
+    // Same directory dance as gen/repair: content via ABSOLUTE paths, then work inside server/ where
+    // rar_villains.txt and rar_villains/ live. Unlike those two this chdir is NOT Windows-only -- the server
+    // that needs repairing runs on Linux.
+    auto absPaid = paidDataPath.absolute();
+    auto absFree = freeDataPath.absolute();
+    auto absUser = userPath.absolute();
+    auto absMods = modsDir.absolute();
+    if (_chdir("server") != 0)
+      std::cerr << "rar_regen_villains: couldn't enter ./server directory (already in it?)\n";
+    MainLoop loop(nullptr, nullptr, nullptr, absPaid, absFree, absUser, absMods, &options, nullptr, nullptr, nullptr,
+        &allUnlocked, nullptr, nullptr, saveVersion, modVersion);
+    loop.rarRegenVillains(commandLineFlags["rar_regen_villains"].get().string);
     exit(0);
   }
   if (commandLineFlags["rar_repair_villains"].was_set()) {
@@ -672,6 +691,12 @@ static int keeperMain(po::parser& commandLineFlags) {
     MainLoop loop(nullptr, nullptr, nullptr, paidDataPath, freeDataPath, userPath, modsDir, &options, nullptr, nullptr, nullptr,
         &allUnlocked, nullptr, nullptr, 0, modVersion);
     loop.rarKeeperLoadTest(commandLineFlags["rar_keeper_load_test"].get().string);
+    return 0;
+  }
+  if (commandLineFlags["rar_villain_load_test"].was_set()) {
+    MainLoop loop(nullptr, nullptr, nullptr, paidDataPath, freeDataPath, userPath, modsDir, &options, nullptr, nullptr, nullptr,
+        &allUnlocked, nullptr, nullptr, saveVersion, modVersion);
+    loop.rarVillainLoadTest(commandLineFlags["rar_villain_load_test"].get().string);
     return 0;
   }
   if (commandLineFlags["rar_load_dungeon_test"].was_set()) {

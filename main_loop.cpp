@@ -2691,6 +2691,148 @@ void MainLoop::rarInvasionLoadTest(const string& gameId) {
   std::cout.flush();
 }
 
+// Rewrite every villain interior in rar_villains/ with THIS binary's serialization, keeping the roster exactly
+// as it is (same ids, same tiles, same tiers) -- so keeper claims, positions and the world map are untouched.
+//
+// WHY THIS EXISTS: a villain .dat is a serialized Model + ContentFactory. Any change to a serialized struct
+// makes every blob written before it unreadable, and the failure surfaces to players only as "That site's map
+// couldn't be loaded from the server" on the ONE action that reads them -- invading. The blobs are generated
+// once by --rar_gen_world and then never rewritten, so they silently rot away from the code while everything
+// else (keeper saves, written continuously by the client) stays current. Regenerating is the repair that does
+// NOT touch the live world: --rar_gen_world would rebuild the map and move everyone's base.
+//
+// Safe to run against a LIVE server: each blob is written to a temp file and renamed into place, so a
+// concurrent /villain request reads either the old file or the new one, never a half-written one. The roster
+// file is never written, so nothing the server holds in memory goes stale.
+void MainLoop::rarRegenVillains(const string& filter) {
+  // filter: "all" = every row, "placed" = only what is on the map, "spares" = only the unplaced respawn pool,
+  // anything else = a single tile ("x_y") or villain id -- so a repair can be proven on ONE blob before it
+  // touches the rest. "spares" exists so a live map can be repaired without re-rolling interiors players may
+  // already be looking at: regenerating a placed villain gives it a NEW random layout.
+  const bool doAll = (filter == "all");
+  const bool placedOnly = (filter == "placed");
+  const bool sparesOnly = (filter == "spares");
+  const bool single = !doAll && !placedOnly && !sparesOnly;
+  vector<string> folderMods = rarModsInLoadOrder(modsDir.getPath());
+  options->setValue(OptionId::CURRENT_MOD2, folderMods);
+  auto factory = createContentFactory(false);
+  struct Row { string id, tier, enemyId, biome, pos; };
+  vector<Row> rows;
+  { std::ifstream in("rar_villains.txt");
+    if (!in) { std::cout << "[rar-regen] no rar_villains.txt in " << "the current directory\n"; return; }
+    string line;
+    while (std::getline(in, line)) {
+      while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+        line.pop_back();
+      if (line.empty())
+        continue;
+      vector<string> f;
+      string cur;
+      for (char c : line) { if (c == '\t') { f.push_back(cur); cur.clear(); } else cur += c; }
+      f.push_back(cur);
+      if (f.size() < 4)
+        continue;
+      rows.push_back(Row{f[0], f[1], f[2], f[3], f.size() > 4 ? f[4] : string()});
+    }
+  }
+  RandomGen random;
+  random.init((int) time(nullptr));
+  EnemyFactory villainEnemies(Random, factory.getCreatures().getNameGenerator(), factory.enemies,
+      factory.buildingInfo, {});
+  SokobanInput villainSokoban(dataFreePath.file("sokoban_input.txt"), userPath.file("sokoban_state.txt"));
+  ModelBuilder villainBuilder(nullptr, random, options, &villainSokoban, &factory, std::move(villainEnemies));
+  int done = 0, skipped = 0, failed = 0, considered = 0;
+  for (auto& r : rows) {
+    if (single) {
+      if (r.pos != filter && r.id != filter)
+        continue;
+    } else if ((placedOnly && r.pos.empty()) || (sparesOnly && !r.pos.empty()))
+      continue;
+    ++considered;
+    auto type = EnumInfo<VillainType>::fromStringSafe(r.tier);
+    if (!type) { ++skipped; std::cout << "[rar-regen] SKIP " << r.id << " -- unknown tier '" << r.tier << "'\n";
+        std::cout.flush(); continue; }
+    EnemyId enemyId(r.enemyId.data());
+    if (!factory.enemies.count(enemyId)) { // e.g. a mod removed the faction since the world was generated
+      ++skipped;
+      std::cout << "[rar-regen] SKIP " << r.id << " -- enemy '" << r.enemyId << "' is not in the current content\n";
+      std::cout.flush();
+      continue;
+    }
+    try {
+      PModel model = villainBuilder.campaignSiteModel(enemyId, *type, TribeAlignment::EVIL, BiomeId(r.biome.data()), 0);
+      for (Level* l : model->getLevels())
+        l->clearSectors();     // recomputed on load; keeps the blob at generation size, not invaded size
+      SavedGameInfo info;
+      info.name = r.enemyId;
+      info.progressCount = 1;
+      info.retiredEnemyInfo = SavedGameInfo::RetiredEnemyInfo{enemyId, *type};
+      string blob = rarLzmaCompress(serializeModelRaw(model.giveMeSharedPointer(), info, &factory));
+      const string finalPath = "rar_villains/" + r.id + ".dat";
+      const string tmpPath = finalPath + ".new";
+      { std::ofstream out(tmpPath, std::ios::binary | std::ios::trunc);
+        out.write(blob.data(), blob.size()); }
+      std::remove(finalPath.c_str());   // POSIX rename would replace it; Windows rename refuses to
+      if (std::rename(tmpPath.c_str(), finalPath.c_str()) != 0) {
+        ++failed;
+        std::cout << "[rar-regen] WRITE FAILED " << finalPath << "\n";
+      } else {
+        ++done;
+        std::cout << "[rar-regen] " << done << " " << r.id << " " << r.enemyId << " "
+                  << (r.pos.empty() ? string("(spare)") : r.pos) << " " << blob.size() << "b\n";
+      }
+    } catch (std::exception& e) {
+      ++failed;
+      std::cout << "[rar-regen] GEN FAILED " << r.id << " '" << r.enemyId << "': " << e.what() << "\n";
+    }
+    std::cout.flush();
+  }
+  std::cout << "[rar-regen] done: considered=" << considered << " regenerated=" << done
+            << " skipped=" << skipped << " failed=" << failed << "\n";
+  std::cout.flush();
+}
+
+// Diagnose "That site's map couldn't be loaded from the server." (--rar_villain_load_test x_y). Runs the same
+// three steps as rarLoadVillainModel -- fetch, lzma-decode, deserialize -- but says WHICH one failed and, for
+// the last, what the exception was. rarLoadVillainModel goes through loadFromFile(), which swallows the
+// exception, so in the game all three failures look identical.
+void MainLoop::rarVillainLoadTest(const string& key) {
+  string blob;
+  if (!rarFetchVillain(key, blob) || blob.empty()) {
+    std::cout << "[villain] FETCH FAILED for '" << key << "' (server has no blob at that tile?) err="
+              << rarLastError() << "\n";
+    return;
+  }
+  std::cout << "[villain] fetched lzma=" << blob.size() << "\n";
+  string raw = rarLzmaDecompress(blob);
+  if (raw.empty()) { std::cout << "[villain] LZMA DECODE FAILED\n"; return; }
+  std::cout << "[villain] decompressed raw=" << raw.size() << "\n";
+  FilePath tmp = userPath.file("rar_villaintest" + getSaveSuffix(GameSaveType::RETIRED_SITE));
+  { ogzstream out(tmp.getPath()); out.write(raw.data(), raw.size()); }
+  createContentFactory(false);   // the blob's ContentFactory deserializes against the registered content
+  for (auto alignment : ENUM_ALL(TribeAlignment))
+    TribeId::switchForSerialization(getPlayerTribeId(alignment), TribeId::getRetiredKeeper());
+  auto _ = OnExit([]{TribeId::clearSwitch();});
+  try {
+    RetiredModelInfo info;
+    CompressedInput input(tmp.getPath());
+    string discard;
+    SavedGameInfo discard2;
+    int version;
+    input.getArchive() >> version >> discard >> discard2;
+    std::cout << "[villain] save_version=" << version << " (this binary writes " << saveVersion << ")\n";
+    input.getArchive() >> info;
+    std::cout << "[villain] LOADED OK -- alive=" << (info.model ? (int) info.model->getAllCreatures().size() : -1)
+              << "\n";
+  } catch (std::exception& e) {
+    std::cout << "[villain] LOAD FAILED: " << e.what() << "\n";
+  } catch (...) {
+    std::cout << "[villain] LOAD FAILED (unknown exception)\n";
+  }
+  tmp.erase();
+  std::cout.flush();
+}
+
 // RAR lockstep feasibility spike (--rar_lockstep_selftest <save.kep> [turns]).
 // Deterministic lockstep is the ONLY model that gives true real-time PvP (both players run the identical sim
 // and exchange only inputs). It works IFF the simulation is bit-deterministic: same start state + same seed +

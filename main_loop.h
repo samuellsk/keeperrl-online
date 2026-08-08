@@ -65,6 +65,8 @@ class MainLoop {
   void compressSelfTest(const string& inFile);  // RAR: --rar_compress_test -> gzip<->lzma transcode round-trip
   void rarInvasionLoadTest(const string& gameId);
   void rarKeeperLoadTest(const string& gameId); // RAR: --rar_load_dungeon_test -> download+load a dungeon model
+  void rarVillainLoadTest(const string& key);   // RAR: --rar_villain_load_test x_y -> why a villain map won't load
+  void rarRegenVillains(const string& filter);  // RAR: --rar_regen_villains -> rewrite villain blobs, roster kept
   void rarLockstepSelfTest(const string& saveFile, int numTurns); // RAR: --rar_lockstep_selftest -> twin-sim determinism check
   void rarLockstepDump(const string& saveFile, int numTurns, int seed, const string& outPath); // one sim -> hash file (fresh-process determinism test)
   void rarLockstepSymTrace(const string& saveFile, int numTurns, int seed, const string& outPath); // symbolized draw-stacks of the last turn (cross-process trace)
