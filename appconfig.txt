@@ -1,0 +1,8 @@
+"upload_url"     "http://keeperrl.com/~retired/37"
+"save_version"   "8104"
+"mod_version"    "Alpha37"
+"steamworks"     "1"
+"server_url"       "https://localhost:38552"
+"server_cert_pin"  "sha256//Y3Z3fgvSWd7knTldNpD6uxjvOLDte0OsQsXOjdbDgYM="
+"server_psk"       "32dde02a7f6caa31ae26ca89c440862cfdb90f062fb15f4fbcc355828742aa7c"
+"server_list_url"  "https://raw.githubusercontent.com/samuellsk/keeperl-online-data/main/servers_list.txt"

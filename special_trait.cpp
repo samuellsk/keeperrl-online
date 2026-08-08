@@ -1,0 +1,71 @@
+#include "stdafx.h"
+#include "special_trait.h"
+#include "creature.h"
+#include "creature_attributes.h"
+#include "body.h"
+#include "workshops.h"
+#include "intrinsic_attack.h"
+#include "content_factory.h"
+
+optional<TStringId> getExtraBodyPartPrefix(const ExtraBodyPart& part) {
+  switch (part.part) {
+    case BodyPart::HEAD:
+      if (part.count == 1)
+        return TStringId("TWO_HEADED");
+      else
+        return TStringId("MULTI_HEADED");
+    case BodyPart::WING:
+      return TStringId("WINGED");
+    default:
+      return none;
+  }
+}
+
+void applySpecialTrait(GlobalTime globalTime, SpecialTrait trait, Creature* c, const ContentFactory* factory) {
+  trait.visit<void>(
+      [&] (const ExtraTraining& t) {
+        c->getAttributes().increaseMaxExpLevel(t.type, t.increase);
+      },
+      [&] (const AttrBonus& t) {
+        c->getAttributes().increaseBaseAttr(t.attr, t.increase);
+      },
+      [&] (const SpecialAttr& t) {
+        c->getAttributes().specialAttr[t.attr].push_back(make_pair(t.value, t.predicate));
+      },
+      [&] (const Lasting& effect) {
+        if (effect.time)
+          addEffect(effect.effect, c, *effect.time, globalTime, factory);
+        else
+          addPermanentEffect(effect.effect, c, false, factory);
+      },
+      [&] (ExtraBodyPart part) {
+        c->getAttributes().add(part.part, part.count, factory);
+        if (auto prefix = getExtraBodyPartPrefix(part)) {
+          c->getName().modifyName(*prefix);
+        }
+      },
+      [&] (const ExtraIntrinsicAttack& a) {
+        auto attack = IntrinsicAttack(a.item);
+        attack.isExtraAttack = true;
+        attack.initializeItem(factory);
+        c->getBody().addIntrinsicAttack(a.part, std::move(attack));
+      },
+      [&] (CompanionInfo type) {
+        c->getAttributes().companions.push_back(type);
+      },
+      [&] (const OneOfTraits&) {
+        FATAL << "Can't apply traits alternative";
+      }
+  );
+}
+
+SpecialTrait transformBeforeApplying(SpecialTrait trait) {
+  return trait.visit<SpecialTrait>(
+      [&] (const auto&) {
+        return trait;
+      },
+      [&] (const OneOfTraits& t) {
+        return Random.choose(t.traits);
+      }
+  );
+}

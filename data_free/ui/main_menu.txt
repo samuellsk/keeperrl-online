@@ -1,0 +1,106 @@
+Def LoadButtonSpacing() Height 10 {} End
+
+Def Spacing 15 End
+
+Def NonClosableWindow(Content) {
+  Fill(Rgb 0 0 0 255)
+  Content
+  Position(LEFT_STRETCHED, Texture(VERT_BAR_MINI2, FLIP_X))
+  Position(RIGHT_STRETCHED, Texture(VERT_BAR_MINI2))
+}
+End
+
+Def TextColor() Rgb 150 150 150 255 End
+
+Def MenuButton(Name) Height 45  {
+  TextureFit(MENU_ITEM)
+  Position(MIDDLE, MarginBottom(4, Label(Name, 22, TextColor())))
+  Focusable Position(MIDDLE, MarginBottom(4, Label(Name, 22, Rgb 255 255 255 255)))
+  Button(soundId = "BUTTON_CLICK")
+}
+End
+
+Def LinkButton(id, label, url) {
+  Horizontal { ViewId(1, {id}) Width 8 {} Label(label, 19, TextColor()) }
+  UrlButton(
+      Horizontal { ViewId(1, {id}) Width 8 {} Label(label, 19, Rgb 255 255 255 255) }
+      url)
+}
+End
+
+Def MenuWidth 300 End
+
+Def BottomLinks()
+  Margins(0, Position(BOTTOM_STRETCHED,{
+    Frame(Rgb 255 255 255 255)
+    Fill(Rgb 0 0 0 200)
+    Margins(10, {
+      Vertical {
+        LinkButton("keeper4", TEXT108, "https://keeperrl.com/category/News")
+        Height 10 {}
+        LinkButton("elementalist", TEXT109, "http://keeperrl.com/wiki")
+        Height 10 {}
+        LinkButton("jester", TEXT110, "https://discordapp.com/invite/XZfCCs5")
+        Height 10 {}
+        LinkButton("gnome", TEXT111, "https://github.com/miki151/keeperrl")
+        Height 10 {}
+        Horizontal {
+          Label(TEXT112, 14, TextColor())
+          Using "install_id" Label(none, 14, TextColor())
+        }
+        Horizontal {
+          Label(TEXT113, 14, TextColor())
+          Using "version" Label(none, 14, TextColor())
+        }
+      }
+    })
+  }))
+End
+
+Position(SCREEN, {
+  Position(ENCAPSULATE, TextureFit(MENU_CORE, FLIP_X))
+  Margins(0, Position(LEFT_STRETCHED, MarginBottom(0, MarginLeft(50, NonClosableWindow({
+    FocusKeysVertical()
+    Width MenuWidth
+    Position(MIDDLE_STRETCHED_Y, Width (-50 + MenuWidth)
+    Vertical {
+      Height 25 {}
+      Height 55 TextureFit("logo4small")
+      Height 25 {}
+      Using "play" MenuButton(PLAY)
+      Height Spacing {}
+      Using "settings" MenuButton(SETTINGS)
+      Height Spacing {}
+      Using "highscores" MenuButton(HIGHSCORES)
+      Height Spacing {}
+      Using "achievements" MenuButton(ACHIEVEMENTS)
+      Height Spacing {}
+      Using "credits" MenuButton(CREDITS)
+      Height Spacing {}
+      Using "quit" MenuButton(QUIT)
+      Stretch {}
+      BottomLinks()
+      Height 15 {}
+    })
+  })))))
+  Using "controller_hint" {
+    Position(BOTTOM_CENTERED, Width 750 MiniWindow({
+      Fill(Rgb 0 0 0 200)
+      Vertical {
+        Label(TEXT15)
+        Height 5 {}
+        Label(TEXT16)
+        Height 5 {}
+        Label(TEXT17)
+        Height 5 {}
+        Label(TEXT18)
+        Height 5 {}
+        Label(TEXT19)
+        Height 5 {}
+        Position(MIDDLE, Texture("deck_menu"))
+      }
+    }))
+    BlockKeyEvents
+    KeybindingHandler(EXIT_MENU)
+  }
+})

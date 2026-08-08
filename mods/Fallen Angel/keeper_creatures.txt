@@ -1,0 +1,35 @@
+"ABYSSUS_FA"
+{
+  baseName = "Fallen Angel"
+  developerOnly = true   # RAR: only a developer account may select this keeper
+  creatureId = { "ABYSSUS_FA_KEEPER_FEMALE" }
+  tribeAlignment = EVIL
+  villainGroups = { EVIL_KEEPER EVIL_COTTAGES }
+  immigrantGroups = { "abyssus_fa_initial_workers" "abyssus_fa" }
+  technology = {
+    "alchemy" "advanced alchemy" "alchemical conversion"
+    "iron working" "jewellery"
+    "archery" "sorcery" "advanced sorcery" "magical weapons" "master sorcery"
+  }
+  initialTech = {}
+  zLevelGroups = { "abyssus_fa_basic" "abyssus_fa_evil" }
+  buildingGroups = {
+    "abyssus_fa_dev_tools"
+    "abyssus_fa_structure" "abyssus_fa_stairs" "abyssus_fa_floors"
+    "abyssus_fa_doors"
+    "abyssus_fa_summoning"
+    "abyssus_fa_living"
+    "abyssus_fa_training"
+    "abyssus_fa_library"
+    "abyssus_fa_crafting"
+    "abyssus_fa_installations"
+    "abyssus_fa_storage"
+    "zones" "orders"
+  }
+  prisoners = false
+  requireQuartersForExp = false
+  workshopGroups = { "abyssus_fa" }
+  credit = { "WOOD" 100 "STONE" 200 "IRON" 200 }
+  description = "Play as a corrupted fallen angel hell-bent on wiping out all life"
+  tribe = FALLEN_ANGEL
+}

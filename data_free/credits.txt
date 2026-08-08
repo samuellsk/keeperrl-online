@@ -1,0 +1,35 @@
+Design and programming:
+Michał Brzozowski
+
+Music:
+Marcin Brzozowski and Krzysztof Łoza
+https://soundcloud.com/martindemarco
+https://soundcloud.com/christopher-loza
+
+Graphics:
+16-bit fantasy set by oryxdesignlab.com
+ShroomArts, shroomarts.blogspot.com
+Artur Reterski, http://artperski.com
+
+Intro film:
+Kamil Kucharski, https://www.behance.net/Kucharsky
+
+Testing and ideas:
+Jakub Jurkowski
+
+Consultations:
+Ted Martens, @ted_martens
+DarkGod, @darkgodone
+
+Extra content:
+SoftMonster
+RighteousSinner
+Archdiggle
+
+Font:
+Lato by Łukasz Dziedzic
+latofonts.com
+
+LodePNG library by Lode Vandevenne
+
+See license.txt for licence of particular data.

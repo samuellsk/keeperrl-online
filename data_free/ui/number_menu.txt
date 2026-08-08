@@ -1,0 +1,72 @@
+
+{
+  ExitButtons()
+  Using "decrease" Button(buttonId = WHEEL_UP)
+  Using "increase" Button(buttonId = WHEEL_DOWN)
+  Vertical {
+    Horizontal {
+      Using "title" Label()
+      Stretch {}
+      Using "range_dec" StandardButtonNotFocusable(Horizontal {
+        Label(TEXT46)
+        Width 5 {}
+        KeybindingHandler("SCROLL_Z_DOWN")
+        RenderKeybinding("SCROLL_Z_DOWN", true)
+      })
+      Using "range_inc" StandardButtonNotFocusable(Horizontal {
+        Label(TEXT47)
+        Width 5 {}
+        KeybindingHandler("SCROLL_Z_UP")
+        RenderKeybinding("SCROLL_Z_UP", true)
+      })
+    }
+    Height 5 {}
+    Horizontal {
+      Stretch {}
+      Label(TEXT48)
+      Using "range_begin" Label()
+      Label(TEXT49)
+      Using "range_end" Label()
+      Label(TEXT50)
+    }
+    Height 10 {}
+    Horizontal {
+      Using "decrease" StandardButtonNotFocusable(Horizontal {
+        Label(TEXT51)
+        Width 5 {}
+        KeybindingHandler("MENU_LEFT")
+        RenderKeybinding("MENU_LEFT", true)
+      })
+      Width 5 {}
+      Stretch Using "slider" Sliding()
+      Width 5 {}
+      Using "increase" StandardButtonNotFocusable(Horizontal {
+        Label(TEXT52)
+        Width 5 {}
+        KeybindingHandler("MENU_RIGHT")
+        RenderKeybinding("MENU_RIGHT", true)
+      })
+    }
+    #Horizontal {
+    #  Using "range_begin" Label()
+      Stretch Position(MIDDLE, Using "current" Label())
+    #  Using "range_end" Label()
+    #}
+    Height 10 {}
+    Position(MIDDLE, Horizontal {
+      Using "confirm" StandardButtonNotFocusable(Horizontal {
+        Label(CONFIRM_BUTTON)
+        Width 5 {}
+        KeybindingHandler("MENU_SELECT")
+        RenderKeybinding("MENU_SELECT", true)
+      })
+      Width 5 {}
+      Using "EXIT" StandardButtonNotFocusable(Horizontal {
+        Label(CANCEL_BUTTON)
+        Width 5 {}
+        KeybindingHandler("EXIT_MENU")
+        RenderKeybinding("EXIT_MENU", true)
+      })
+    })
+  }
+}

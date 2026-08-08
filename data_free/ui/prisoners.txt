@@ -1,0 +1,24 @@
+
+Def P(Text) Paragraph(500, Text) End
+
+MiniWindow(Scrolling(MarginRight(30, MarginLeft(30,  
+  Vertical {
+    Horizontal{ViewId(1, {"prisoner"}) Width 10 {} Label(TEXT53)}
+    Height 30 {}
+    P(TEXT154)
+    Height 15 {}
+    P(TEXT155)
+    Height 15 {}
+    Position(MIDDLE, Texture("capture1"))
+    Height 15 {}
+    P(TEXT156)
+    Height 15 {}
+    P(TEXT157)
+    Height 15 {}
+    Position(MIDDLE, Texture("capture2"))
+    Height 15 {}
+    P(TEXT158)
+    Height 15{}
+    Position(MIDDLE, Texture("capture3"))
+  }
+))))

@@ -1,0 +1,29 @@
+"structure_without_reinforce" modify append
+  {
+    { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
+    { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+  }
+
+"structure" modify append
+  {
+    { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
+    { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+  }
+
+"structure_dwarf" modify append
+  {
+    { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
+    { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+  }
+
+"structure_necro" modify append
+  {
+    { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
+    { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+  }
+
+"structure_white_knight" modify append
+  {
+    { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
+    { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+  }

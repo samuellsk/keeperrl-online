@@ -1,0 +1,10 @@
+Def LEVEL_LABEL(NUM)
+Label(SPELL_LEVEL(NUM)) Label(":") Width 10 {}
+End
+
+MiniWindow(Vertical {
+  Height 23 Horizontal { LEVEL_LABEL("1") Label(BUFF_PLAGUE) }
+  Height 23 Horizontal { LEVEL_LABEL("2") Label(BUFF_INSANITY) }
+  Height 23 Horizontal { LEVEL_LABEL("3") Label(BUFFS_BLEEDING_NAME) }
+  Height 23 Horizontal { LEVEL_LABEL("4") Label(PERMANENT_POLYMORPH_EFFECT_NAME) }
+})

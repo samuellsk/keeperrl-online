@@ -1,0 +1,29 @@
+
+Def P(Text) Paragraph(500, Text) End
+
+MiniWindow(Scrolling(MarginRight(30, MarginLeft(30,
+  Vertical {
+    Horizontal{ViewId(1, {"sword"}) Width 10 {} Label(TEXT41)}
+    Height 30 {}
+    P(TEXT143)
+    Height 15 {}
+    Position(MIDDLE, Texture("damage1"))
+    Height 15 {}
+    P(TEXT144)
+    Height 15 {}
+    P(TEXT145)
+    Height 15 {}
+    P(TEXT146)
+    Height 15 {}
+    Position(MIDDLE, Texture("damage2"))
+    Height 15 {}
+    P(TEXT147)
+    Height 15 {}
+    Position(MIDDLE, Texture("damage3"))
+    Height 15 {}
+    P(TEXT148)
+    Height 15 {}
+    P(TEXT149)
+    Height 15 {}
+  }
+))))

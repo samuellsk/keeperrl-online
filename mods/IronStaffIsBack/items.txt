@@ -1,0 +1,36 @@
+
+####################################
+##### Removed by Michal in 1_0 #####
+####################################
+
+"IronStaff"
+  {
+    viewId = { "iron_staff" }
+    equipedViewId = { "iron_staff_v" }
+    name = "iron staff"
+    itemClass = WEAPON
+    equipmentSlot = WEAPON
+    weight = 1.5
+    modifiers = {
+      SPELL_DAMAGE 8
+      SPELL_SPEED 8
+    }
+    price = 60
+    craftingCost = "IRON" 40
+    weaponInfo = {
+      attackType = SPELL
+      attackMsg = WAVE
+      meleeAttackAttr = SPELL_DAMAGE
+    }
+    genPrefixes = {
+      1 VictimEffect 1.0 Escape{}
+      1 VictimEffect 0.4 DestroyEquipment
+      1 JoinPrefixes {
+        ItemAttrBonus SPELL_DAMAGE 20
+        AttackerEffect Suicide DIE
+      }
+    }
+    maxUpgrades = 2
+    storageIds = {"weapons" "equipment"}
+    equipmentGroup = EQUIPMENT_GROUP_IRON_EQUIPMENT
+  }

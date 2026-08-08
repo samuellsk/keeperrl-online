@@ -1,0 +1,2 @@
+"Sam"
+"Changes token of workshop to bookcase token in vampire z_level in case it generates with gnome workshop"

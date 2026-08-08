@@ -1,0 +1,107 @@
+"abyssus_fa_basic"
+{
+  {
+    type = EnemyZLevel {
+      enemy = "Z_LEVEL_FULL_ONLY_WATER"
+    }
+    minDepth = 0
+    maxDepth = 6
+  }
+  {
+    type = EnemyZLevel {
+      enemy = "Z_LEVEL_FULL"
+    }
+    minDepth = 6
+    maxDepth = 22
+  }
+  {
+    type = FullZLevel {
+      # You can optionally add an EnemyId. Warning: some enemies might not work
+      enemy = "BLACK_RATS"
+    }
+    # Possible depths for this level, inclusive. The first level when you dig down is 1.
+    minDepth = 5
+    maxDepth = 5
+    weight = 0.5
+  }
+  {
+    type = EnemyZLevel {
+      enemy = "Z_LEVEL_ZOMBIE"
+    }
+    minDepth = 8
+    maxDepth = 8
+    guarantee = true
+  }
+  { # adamantium, the ores are added automatically around the golems
+    type = FullZLevel {
+      enemy = "ADA_GOLEMS"
+    }
+    minDepth = 13
+    maxDepth = 13
+    guarantee = true
+  }
+  {
+    type = EnemyZLevel {
+      enemy = "Z_LEVEL_BLACK_DRAGON"
+    }
+    minDepth = 18
+    maxDepth = 18
+    guarantee = true
+  }
+  {
+    type = EnemyZLevel {
+      enemy = "Z_LEVEL_BALROG"
+      attackChance = 1.0
+    }
+    minDepth = 23
+    maxDepth = 23
+    guarantee = true
+  }
+  {
+    type = EnemyZLevel {
+      enemy = "Z_LEVEL_HELL"
+      mountainType = "HELL_MOUNTAIN"
+    }
+    minDepth = 24
+  }
+  {
+    # A level full of water with some islands
+    type = WaterZLevel {
+      waterType = "WATER"
+      creatures = {
+        # Total no of creatures on this level. All are hostile
+        count = {10 11}
+        all = {
+          # The number is the weight, i.e. rats are twice as many as elementals
+          2 "RAT"
+          1 "WATER_ELEMENTAL"
+        }
+      }
+    }
+    minDepth = 7
+    maxDepth = 10
+    weight = 0.3
+  }
+  {
+    type = EnemyZLevel {
+      enemy = "Z_LEVEL_LAVA"
+    }
+    minDepth = 10
+    weight = 0.3
+  }
+}
+
+"abyssus_fa_evil"
+{
+  LEVEL("RAT_PEOPLE_Z_LEVEL", 2, 3)
+  LEVEL("DWARVES_Z_LEVEL", 4, 22)
+  {
+    type = EnemyZLevel {
+      enemy = "Z_LEVEL_VAMPIRE_VAULT_MONSTER"
+    }
+    minDepth = 3
+    maxDepth = 3
+    guarantee = true
+  }
+}
+

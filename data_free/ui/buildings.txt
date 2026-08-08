@@ -1,0 +1,25 @@
+
+Def P(Text) Paragraph(700, Text) End
+
+MiniWindow(Scrolling(MarginRight(30, MarginLeft(30,  
+  Vertical {
+    Horizontal{ViewId(1, {"castle_wall"}) Width 10 {} Label(TEXT3)}
+    Height 30 {}
+    P(TEXT129)
+    Height 15 {}
+    P(TEXT130)
+    Height 15 {}
+    Position(MIDDLE, Texture("buildings1"))
+    Height 15 {}
+    P(TEXT131)
+    Height 15 {}
+    P(TEXT132)
+    Height 15 {}
+    P(TEXT133)
+    Height 15 {}
+    Position(MIDDLE, Texture("buildings2"))
+    Height 15 {}
+    P(TEXT134)
+    Height 15 {}
+  }
+))))

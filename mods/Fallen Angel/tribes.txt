@@ -1,0 +1,5 @@
+"FALLEN_ANGEL" {
+  diplomatic = false
+  enemyOfAll = true
+  keeperTribe = true
+}

@@ -1,0 +1,17 @@
+Welcome, Keeper. A few things about playing in a shared world.
+
+PROTECTION
+You are protected from other keepers for 48000 turns, or 5 days of
+real time, whichever runs out first. Once either one expires the
+protection is gone and your dungeon can be invaded.
+
+REINVASION
+After someone invades you, you are protected for 15 minutes before
+anyone can invade you again.
+
+ACCOUNT LOCKOUT
+If you crash, or close the game with the X instead of saving and
+exiting, your account stays locked for 5 minutes. You will not be
+able to log back in until it clears.
+
+Always leave through "save and exit" if you can.

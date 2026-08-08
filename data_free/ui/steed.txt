@@ -1,0 +1,27 @@
+
+Def P(Text) Paragraph(500, Text) End
+
+MiniWindow(Scrolling(MarginRight(30, MarginLeft(30,  
+  Vertical {
+    Height 5 {}
+    Horizontal{ViewId(1, {"horse"}) Width 10 {} Label(TEXT20)}
+    Height 30 {}
+    P(TEXT135)
+    Height 15 {}
+    P(TEXT136)
+    Height 15 {}
+    Position(MIDDLE, Texture("steeds1"))
+    Height 15 {}
+    P(TEXT137)
+    Height 15 {}
+    Position(MIDDLE, Texture("steeds2"))
+    Height 15 {}
+    P(TEXT138)
+    Position(MIDDLE, Texture("steeds3"))
+    P(TEXT139)
+    Height 15 {}
+    P(TEXT140)
+    Height 15 {}
+    Position(MIDDLE, Texture("steeds4"))
+  }
+))))

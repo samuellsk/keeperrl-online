@@ -1,0 +1,9 @@
+"ABYSSUS_FA_CORRUPTED_FLESH" {
+  name = "corrupted flesh"
+  deathDescription = "killed"
+  healthType = FLESH
+  canLoseBodyParts = false
+  hasBrain = true
+  canCopulate = true
+  losingHeadsMeansDeath = true
+}

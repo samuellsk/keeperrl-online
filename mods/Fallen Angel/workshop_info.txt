@@ -1,0 +1,32 @@
+"ABYSSUS_FA_WORKSHOP" {
+  furniture = "ABYSSUS_FA_WORKSHOP"
+  name = "workshop"
+  attr = "WORKSHOP"
+}
+
+"ABYSSUS_FA_FORGE" {
+  furniture = "ABYSSUS_FA_FORGE"
+  name = "forge"
+  verb = "forges"
+  attr = "FORGE"
+  minAttr = {
+    IRON 1
+    ADA 50
+    ADOXIUM 80
+    INFERNITE 80
+  }
+}
+
+"ABYSSUS_FA_LABORATORY" {
+  furniture = "ABYSSUS_FA_LABORATORY"
+  name = "laboratory"
+  verb = "concocts"
+  attr = "LABORATORY"
+}
+
+"ABYSSUS_FA_JEWELER" {
+  furniture = "ABYSSUS_FA_JEWELLER"
+  name = "jeweler"
+  attr = "JEWELER"
+}
+

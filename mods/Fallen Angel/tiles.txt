@@ -1,0 +1,56 @@
+##### Items
+{ "abyssus_fa_items_armor" "]" ColorId LIGHT_GRAY }
+{ "abyssus_fa_items_boots" "]" ColorId LIGHT_GRAY }
+{ "abyssus_fa_items_gauntlets" "]" ColorId LIGHT_GRAY }
+{ "abyssus_fa_items_helm" "]" ColorId LIGHT_GRAY }
+{ "abyssus_fa_items_shield" "]" ColorId LIGHT_GRAY }
+{ "abyssus_fa_items_inferno_pike" "]" ColorId LIGHT_GRAY }
+{ "abyssus_fa_items_inferno_bolter" "]" ColorId LIGHT_GRAY }
+{ viewId = "abyssus_fa_items_inferno_pike_v" symbol = ")" color = ColorId LIGHT_GRAY weaponOrigin = {15 15} }
+
+##### Spells
+{ "abyssus_fa_inferno_bolt" "⇾" ColorId LIGHT_RED }
+{ "abyssus_fa_inferno_bolt_double" "⇾" ColorId RED }
+{ "abyssus_fa_eye_shot_seraphic" "-" ColorId LIGHT_RED }
+{ "abyssus_fa_eye_shot_voidling_coil" "-" ColorId PURPLE }
+{ viewId = "abyssus_fa_spells_monoculus_shot" symbol = "O" color = ColorId RED animated = true }
+
+##### Fallen Angel Minions
+{ "abyssus_fa_seraphic_gazer" "⊙" ColorId WHITE }
+{ "abyssus_fa_voidling_coil" "⊙" ColorId PURPLE }
+{ "abyssus_fa_voidcall_boltmaiden" "🏹" ColorId LIGHT_RED }
+{ "abyssus_fa_voidcall_enchantress" "👁" ColorId LIGHT_RED }
+{ "abyssus_fa_pitbound_goliath" "⚒" ColorId LIGHT_BROWN }
+{ "abyssus_fa_riftshard_brute" "R" ColorId LIGHT_RED }
+{ viewId = "abyssus_fa_keeper_hood" symbol = "@" color = ColorId PURPLE weaponOrigin = {3 15} }
+{ viewId = "abyssus_fa_monoculus" symbol = "M" color = ColorId LIGHT_RED weaponOrigin = {4 13} }
+
+##### Furniture
+{ viewId = "abyssus_fa_summoning_portal" symbol = "O" color = ColorId RED roundShadow = true animated = true }
+{ viewId = "abyssus_fa_floor_1" symbol = "." color = ColorId GRAY }
+{ viewId = "abyssus_fa_floor_2" symbol = "." color = ColorId LIGHT_GRAY }
+{ viewId = "abyssus_fa_floor_3" symbol = "," color = ColorId GRAY }
+{ viewId = "abyssus_fa_floor_4" symbol = "," color = ColorId LIGHT_GRAY }
+{ viewId = "abyssus_fa_wall" symbol = "#" color = ColorId BLUE wallShadow = true wallConnections = true }
+{ viewId = "abyssus_fa_magma_wall" symbol = "#" color = ColorId ORANGE wallShadow = true wallConnections = true }
+{ "abyssus_fa_summoning_circle" "O" ColorId RED }
+{ "abyssus_fa_cauldron" "C" ColorId BROWN }
+{ "abyssus_fa_jeweller" "J" ColorId YELLOW }
+{ "abyssus_fa_workshop" "W" ColorId BROWN }
+{ "abyssus_fa_dining_table_small" "=" ColorId BROWN }
+{ "abyssus_fa_dining_table_big" "=" ColorId LIGHT_BROWN }
+{ "abyssus_fa_book_on_pedestal" "B" ColorId YELLOW }
+{ "abyssus_fa_bookcase_wood" "b" ColorId BROWN }
+{ "abyssus_fa_bookcase_iron" "b" ColorId GRAY }
+{ "abyssus_fa_bookcase_gold" "b" ColorId YELLOW }
+{ "abyssus_fa_training_dummy_wood" "T" ColorId BROWN }
+{ "abyssus_fa_training_dummy_iron" "T" ColorId GRAY }
+{ "abyssus_fa_forge" "F" ColorId ORANGE }
+{ "abyssus_fa_stairs_up" "<" ColorId GRAY }
+{ "abyssus_fa_stairs_down" ">" ColorId GRAY }
+{ viewId = "abyssus_fa_door_ew" symbol = "-" color = ColorId GRAY wallShadow = true }
+{ viewId = "abyssus_fa_door_ns" symbol = "|" color = ColorId GRAY }
+{ viewId = "abyssus_fa_gate_w" symbol = "-" color = ColorId GRAY wallShadow = true }
+{ viewId = "abyssus_fa_gate_e" symbol = "-" color = ColorId GRAY wallShadow = true }
+{ viewId = "abyssus_fa_gate_n" symbol = "|" color = ColorId GRAY }
+{ viewId = "abyssus_fa_gate_s" symbol = "|" color = ColorId GRAY }

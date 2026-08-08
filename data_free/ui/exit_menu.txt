@@ -1,0 +1,37 @@
+
+Def IconButton(Id, Text)
+    Vertical {
+      Height 140 Width 140 StandardButton(ViewId(5, {Id}))
+      Height 10 {}
+      Position(MIDDLE, Height 20 Paragraph(width = 120 text = Text centerLines = true))
+      Height 10 {}
+    }
+End
+
+Def IconButtonInactive(Id, Text)
+  Vertical {
+    Height 140 Width 140 StandardButtonInactive(ViewId(5, {Id}))
+    Height 10 {}
+    Position(MIDDLE, Label(text = Text color = ColorId LIGHT_GRAY))
+    Height 10 {}
+  }
+End
+
+{
+  ExitButtons()
+  FocusKeysHorizontal()
+  Window(Vertical {
+    Horizontal {
+      Using "save" IconButton("portal", TEXT57)
+      Width 20 {}
+      Using "options" IconButton("gnome", TEXT58)
+      Width 20 {}
+      Using "retire" IconButton("throne", TEXT59)
+      Using "retire_inactive" IconButtonInactive("throne", TEXT59)
+      Width 20 {}
+      Using "abandon" IconButton("grave", TEXT60)
+    }
+    Height 20 {}
+    }
+  )
+}

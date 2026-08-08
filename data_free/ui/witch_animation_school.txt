@@ -1,0 +1,12 @@
+Def LEVEL_LABEL(NUM)
+Label(SPELL_LEVEL(NUM)) Label(":") Width 10 {}
+End
+
+Def VIEW_ID(TEXT) ViewId(1, {TEXT}) Width 10 {} End
+
+MiniWindow(Vertical {
+  Height 26 Horizontal { LEVEL_LABEL("1") VIEW_ID("knife") Label(ANIMATE_SMALL_ITEMS_EFFECT_NAME) }
+  Height 26 Horizontal { LEVEL_LABEL("2") VIEW_ID("chain_armor") Label(ANIMATE_MEDIUM_ITEMS_EFFECT_NAME) }
+  Height 26 Horizontal { LEVEL_LABEL("3") VIEW_ID("bed1") Label(ANIMATE_FURNITURE_EFFECT_NAME) }
+  Height 26 Horizontal { LEVEL_LABEL("4") VIEW_ID("wood_wall") Label(ANIMATE_WALLS_EFFECT_NAME) }
+})

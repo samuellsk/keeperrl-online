@@ -1,0 +1,15 @@
+# Point the necromancer at the ally-free groups from this mod's campaign_villains.txt.
+#
+# 'modify' edits the existing vanilla entry in place, keeping every other field. Re-declaring the
+# key outright would be a hard "Duplicate key" parse error, because vanilla and every mod are parsed
+# as ONE map -- 'modify' is the only way to override an entry that already exists.
+#
+# Only 4_necromancer is touched. The other EVIL keepers keep vanilla EVIL_KEEPER and its allies.
+"4_necromancer" modify {
+  villainGroups = { NECRO_KEEPER NECRO_COTTAGES }
+  # Put the necromancer on its own content tribe (defined in this mod's tribes.txt) instead of the default
+  # EVIL keeper tribe (DARK_KEEPER). UNDEAD_KEEPER is enemyOfAll -> no allies, hostile to everything.
+  # tribeAlignment stays EVIL (it still drives the biome villain set + the RAR two-camp logic); only the
+  # tribe identity + friend/foe changes.
+  tribe = UNDEAD_KEEPER
+}

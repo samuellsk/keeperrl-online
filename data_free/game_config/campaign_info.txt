@@ -1,0 +1,32 @@
+"default" {
+  size = {200 130}
+  mapZoom = 2
+  minimapZoom = 2
+  maxMainVillains = 24
+  maxLesserVillains = 24
+  maxMinorVillains = 32
+  maxAllies = 16
+  initialRadius = 14
+  minMainVillainsAlive = 12
+  minLesserVillainsAlive = 12
+  minMinorVillainsAlive = 16
+  poolMainVillainsGenerated = 10
+  poolLesserVillainsGenerated = 10
+  poolMinorVillainsGenerated = 10
+  # Endless enemy waves attacking your dungeon (off by default). Uncomment one to enable:
+  #   0 = off, 1 = waves from the start, 2 = waves only after you win
+  endlessEnemies = 1
+  # Enemy difficulty curve (server-fixed online, not a player option): 0 = mild, 1 = normal, 2 = extreme
+  expIncrease = 1
+
+  # ---- RAR villain waves (world-map villains attacking your base) ----
+  # Tune freely: these are read from this file and are NOT stored in saves, so changing them affects an
+  # existing game on the next load (with the "Reload data files on load" option on).
+  villainWaveGracePeriod = 1000    # no villain stirs before this turn -- a new keeper gets peace to build
+  villainWavePrepMin = 800         # once triggered, the wave lands this many turns later at the earliest ...
+  villainWavePrepMax = 1500        # ... and this many at the latest (your warning window)
+  villainWaveForcePercent = 75     # % of the villain's maxPopulation that marches (fighters, never leader-only)
+  villainProximityRadius = 7       # Proximity trigger fires for villains within this many world-map tiles
+  villainWaveCooldownRollMin = 400 # random slack on top of waveSize * immigrantInterval ...
+  villainWaveCooldownRollMax = 1400# ... before that same villain may attack again
+}

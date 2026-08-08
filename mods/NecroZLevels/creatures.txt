@@ -1,0 +1,29 @@
+"ZOMBIE_WORKER_BUFFED"
+  {
+    viewId = { "zombie" }
+    attr = {
+      DAMAGE 14
+      DEFENSE 17
+      DIGGING 25
+    }
+    body = {
+      type = Humanoid LARGE
+      material = UNDEAD_FLESH
+      drops = {
+        none 20
+        { "ZombieBrain" } 1
+      }
+    }
+    permanentEffects = {
+      RANGED_RESISTANCE 1
+      NO_CARRY_LIMIT 1
+    }
+    maxLevelIncrease = {
+      DAMAGE 3
+    }
+    name = {
+      name = CREATURE_ATTRIBUTES_ZOMBIE_NAME
+    }
+    spells = { "i am zombie worker" }
+    hatedByEffect = HATE_UNDEAD
+  }

@@ -1,0 +1,61 @@
+
+Def Title(Text)
+  Height 25 Position(MIDDLE, Label(Text, 19, ColorId YELLOW))
+End
+
+Def Content(Text)
+  Height 25 Position(MIDDLE, Label(Text))
+End
+
+Window(Width 700 Height 700 {
+  BlockEvents
+  ExitButtons()
+  Scrolling(Vertical {
+    Title(TEXT67)
+    Content(TEXT68)
+    Height 10 {}
+    Title(TEXT69)
+    Content(TEXT70)
+    Content(TEXT71)
+    Content(TEXT72)
+    Height 10 {}
+    Title(TEXT73)
+    Content(TEXT74)
+    Content(TEXT75)
+    Content(TEXT76)
+    Content(TEXT77)
+    Height 10 {}
+    Title(TEXT78)
+    Content(TEXT79)
+    Height 10 {}
+    Title(TEXT80)
+    Content(TEXT81)
+    Height 10 {}
+    Title(TEXT82)
+    Content(TEXT83)
+    Content(TEXT84)
+    Height 10 {}
+    Title(TEXT85)
+    Content(TEXT86)
+    Content(TEXT87)
+    Content(TEXT88)
+    Height 10 {}
+    Title(TEXT89)
+    Content(TEXT90)
+    Content(TEXT91)
+    Content(TEXT92)
+    Content(TEXT93)
+    Content(TEXT94)
+    Content(TEXT95)
+    Content(TEXT96)
+    Content(TEXT97)
+    Content(TEXT98)
+    Content(TEXT99)
+    Height 10 {}
+    Title(TEXT100)
+    Content(TEXT101)
+    Content(TEXT102)
+    Height 10 {}
+    Content(TEXT103)
+  })
+})

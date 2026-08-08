@@ -1,0 +1,153 @@
+
+GCC = $(PREFIX)g++
+PKG_CONFIG = $(PREFIX)pkg-config
+
+LD = $(GCC)
+CFLAGS += -Wall -std=c++1y -Wno-return-type -Wno-sign-compare -Wno-unused-variable -Wno-strict-aliasing -Wl,--build-id -Wa,-mbig-obj -Wno-missing-template-arg-list-after-template-kw -Wno-unknown-warning-option
+
+ifdef DATA_DIR
+	CFLAGS += -DDATA_DIR=\"$(DATA_DIR)\"
+endif
+
+ifdef DEBUG
+GFLAG += -g
+endif
+
+NO_OMIT_FP = true
+
+ifdef NO_OMIT_FP
+GFLAG += -fno-omit-frame-pointer
+endif
+
+ifdef PROF
+GFLAG += -pg
+endif
+
+ifdef SIMPLE_PROFILER
+GFLAG += -DSIMPLE_PROFILER
+endif
+
+# Debug symbols ONLY -- a PDB so the crash handler can name our frames (dbghelp cannot read clang's default
+# DWARF), WITHOUT the sampling profiler thread that SAMPLE_PROFILER also switches on. That thread suspends the
+# game thread ~1000x/sec to walk its stack: unacceptable stalls during a real-time PvP battle, and it uses
+# dbghelp concurrently with the crash handler. Use this for normal/release testing; SAMPLE_PROFILER only when
+# actually profiling.
+ifdef PDB
+GFLAG += -gcodeview -Wl,--pdb=keeper.pdb -Wno-unused-command-line-argument
+endif
+
+ifdef SAMPLE_PROFILER
+# -gcodeview + lld --pdb generate a PDB so dbghelp can resolve keeper.exe symbols
+# (dbghelp cannot read clang's default DWARF debug info).
+GFLAG += -DSAMPLE_PROFILER -gcodeview -Wl,--pdb=keeper.pdb -Wno-unused-command-line-argument
+endif
+
+ifdef RELEASE
+GFLAG += -DRELEASE
+endif
+
+ifndef AMD64
+GFLAG += -Wl,--large-address-aware
+endif
+
+ifdef STEAMWORKS
+include Makefile-steam
+endif
+
+ifdef OPT
+GFLAG += -O2
+endif
+
+
+ifndef OPTFLAGS
+	OPTFLAGS = -Winvalid-pch -DWINDOWS $(GFLAG)
+endif
+
+ifndef OBJDIR
+OBJDIR = obj
+endif
+NAME = keeper
+
+ROOT = ./
+TOROOT = ./../
+IPATH = -I. -I./extern -Iextern/steamworks/public
+
+CFLAGS += $(IPATH)
+
+ifdef STEAMWORKS
+SRCS = $(shell ls -t *.cpp)
+else
+SRCS = $(shell ls -t *.cpp | grep -v steam_.*.cpp)
+endif
+
+ifdef UNITY
+$(shell rm unity.cpp; for I in *.cpp; do echo \#include \"$$I\" | grep -v stack_printer | grep -v fontstash | grep -v file_sharing | grep -v theoraplay | grep -v steam_ >> unity.cpp; done )
+SRCS = unity.cpp file_sharing.cpp fontstash.cpp stack_printer.cpp theoraplay.cpp
+endif
+
+SRCS += $(shell ls -t extern/*.cpp)
+
+ifdef AMD64
+RES_FILE=keeper.res
+else
+RES_FILE=keeper32.res
+endif
+
+OPENAL = $(shell $(PKG_CONFIG) --libs openal)
+
+LIBS = -mwindows ${RES_FILE} -lvorbisfile -lvorbis -logg -ltheoradec -lSDL2_image -lkernel32 -luser32 -lgdi32 -lcomdlg32 \
+	   -lole32 -ldinput -lddraw -ldxguid -lwinmm -ldsound -lpsapi -lgdiplus -lshlwapi -luuid -ldbghelp $(STEAM_LIBS) \
+	-lSDL2 -lSDL2main -lglu32 -lz -ljpeg $(OPENAL) -lopengl32 -lcurl -limagehlp -lpthread -lws2_32 -llzma -lssl -lcrypto -fuse-ld=lld
+
+ifdef debug
+	CFLAGS += -g
+	OBJDIR := ${addsuffix -d,$(OBJDIR)}
+	NAME := ${addsuffix -d,$(NAME)}
+else
+	CFLAGS += $(OPTFLAGS)
+endif
+
+
+OBJS = $(addprefix $(OBJDIR)/,$(SRCS:.cpp=.o))
+DEPS = $(addprefix $(OBJDIR)/,$(SRCS:.cpp=.d))
+
+##############################################################################
+
+all:
+	@$(MAKE) -f Makefile-win --no-print-directory info
+	bash ./gen_version.sh
+	@$(MAKE) -f Makefile-win --no-print-directory compile
+
+compile: gen_version $(NAME)
+
+stdafx.h.gch: stdafx.h $(wildcard *.h)
+	$(GCC) -MMD $(CFLAGS) -c $< -o $@
+
+ifndef RELEASE
+PCH = $(OBJDIR)/stdafx.h.gch
+PCHINC = -include stdafx.h
+endif
+
+# rar_server.cpp includes cpp-httplib, which needs a Windows 8+ API level.
+$(OBJDIR)/rar_server.o: rar_server.cpp
+	$(GCC) -MMD $(CFLAGS) -D_WIN32_WINNT=0x0A00 -c $< -o $@
+
+$(OBJDIR)/%.o: %.cpp ${PCH}
+	$(GCC) -MMD $(CFLAGS) $(PCHINC) -c $< -o $@
+
+$(NAME): $(OBJS)
+	$(LD) $(CFLAGS) -o $@ $^ $(LIBS)
+
+gen_version:
+	bash ./gen_version.sh
+
+info:
+	@$(GCC) -v 2>&1 | head -n 2
+clean:
+	$(RM) $(OBJDIR)/*.o
+	$(RM) $(OBJDIR)/*.d
+	$(RM) $(NAME)
+	$(RM) stdafx.h.gch
+	$(RM) unity.cpp
+
+-include $(DEPS)

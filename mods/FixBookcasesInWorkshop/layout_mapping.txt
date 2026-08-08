@@ -1,0 +1,4 @@
+"z_level_vampire_vault" modify append {
+  "bed" Place "COFFIN1"
+  "bookcase" Place "BOOKCASE_WOOD"
+}

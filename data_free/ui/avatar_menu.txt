@@ -1,0 +1,86 @@
+
+Def KeeperButton() {
+  Using "selected" MarginTop(-1, MarginBottom(-4, NewHighlight()))
+  If "select_callback" MarginTop(2, MarginBottom(2, Using "base_name" Label()))
+  MarginTop(2, MarginBottom(2, If "locked" Using "base_name" Label(color = ColorId LIGHT_GRAY)))
+  If "locked" GetTooltip(Label(TEXT125))
+  Using "select_callback" Button()
+}
+End
+
+Def GenderButton() {
+  Using "selected" MarginLeft(5, MarginTop(-3, MarginRight(-2, MarginBottom(-4, NewHighlight()))))
+  Using "view_id" ViewId(2)
+  Using "select_callback" Button()
+}
+End
+
+{
+  BlockEvents
+  ExitButtons()
+  Using "base_inc_callback" KeybindingHandler(MENU_DOWN)
+  Using "base_dec_callback" KeybindingHandler(MENU_UP)
+  Using "gender_inc_callback" KeybindingHandler(MENU_RIGHT)
+  Using "gender_dec_callback" KeybindingHandler(MENU_LEFT)
+  Vertical {
+    Stretch Window({
+      #FocusKeysVertical()
+      Width 800 Height 330
+      Vertical {
+        Horizontal {
+          Width 300 Height 290 Vertical {
+            Horizontal {
+              Label(TEXT5)
+              Width 5{}
+              RenderKeybinding("MENU_UP", true)
+              Width 5{}
+              RenderKeybinding("MENU_DOWN", true)
+            }
+            Height 10 {}
+            Stretch Using "keeper_list" MarginRight(40, Scrolling(MarginRight(10, List(VERTICAL, KeeperButton()))))
+          }
+          Stretch Vertical {
+            Horizontal {
+              Label(TEXT6)
+              Width 5{}
+              RenderKeybinding("MENU_LEFT", true)
+              Width 5{}
+              RenderKeybinding("MENU_RIGHT", true)
+            }
+            Height 10 {}
+            Horizontal {
+              Using "gender_list" List(HORIZONTAL, MarginRight(5, GenderButton()))
+            }
+            Height 5 {}
+            Using "gender_description" Label()
+            Height 5 {}
+            Height 27 Horizontal {
+              Using "first_name" MarginTop(1, Label(TEXT7))
+              Using "settlement_name" MarginTop(1, Label(TEXT8))
+              If "edit_first_name"
+                Width 300{
+                  Frame(ColorId LIGHT_GRAY)
+                  MouseOver Frame(ColorId WHITE)
+                  MarginTop(2, MarginRight(5, MarginLeft(5, Using "first_name" Label())))
+                  MarginTop(2, MarginRight(5, MarginLeft(5, Using "settlement_name" Label())))
+                  Using "edit_first_name" Button()
+                }
+              Using "reload_first_name" StandardButtonNotFocusable(Label(text = TEXT9, font = SYMBOL_FONT))
+            }
+            Height 30 {}
+            Using "base_description" Paragraph(width = 450, color = ColorId LIGHT_GRAY)
+          }
+        }
+        Height 20 {}
+        Stretch {}
+        Position(MIDDLE, Using "start_game" Width 265 KeybindingButton(TEXT126, MENU_SELECT))
+      }
+    })
+    MarginTop(-3,
+    Position(MIDDLE, Horizontal {
+      Width 265 Using "tutorial_callback" StandardButtonNotFocusable(Label(TEXT10))
+      Width 265 Using "change_mod" StandardButtonNotFocusable(Label(TEXT11))
+      Width 265 Using "go_back" KeybindingButton(TEXT127, EXIT_MENU)
+    }))
+  }
+}

@@ -1,0 +1,27 @@
+"Z_LEVEL_VAMPIRE_VAULT_NECRO"
+{
+  settlement = {
+    type = RandomLayout { "z_level_vault" { 80 80 } "z_level_vampire_vault" }
+    tribe = UNDEAD_KEEPER
+    inhabitants = {
+      fighters = {
+        count = 4
+        all = { 1 "VAMPIRE" }
+      }
+    }
+  }
+}
+
+"Z_LEVEL_ZOMBIE_NECRO"
+{
+  settlement = {
+    type = RandomLayout { "z_level_castle" { 80 80 } "default" }
+    tribe = UNDEAD_KEEPER
+    inhabitants = {
+      fighters = {
+        count = {50}
+        all = { 1 "ZOMBIE_WORKER_BUFFED" }
+      }
+    }
+  }
+}

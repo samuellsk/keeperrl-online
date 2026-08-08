@@ -1,0 +1,53 @@
+
+Def LoadButtonSpacing() Height 10 {} End
+
+Def SavedGameContent() Vertical {
+  # MinHeight so the row is always tall enough to stack "Load game" (TOP_RIGHT) above "Erase" (BOTTOM_RIGHT).
+  # A row's height comes from its content, and a keeper that lives ONLY on the server has no minion icons to
+  # show -- so its row collapsed to label+date and the two buttons landed on top of each other.
+  MinHeight 58 {
+    {
+      Horizontal {
+        Vertical {
+          Horizontal { Using "label" Label() Using "warlord" Label(TEXT104) }
+          Using "date" Label(none, 14, ColorId GRAY)
+          Using "viewIds" List(HORIZONTAL, ViewId(1))
+        }
+        Stretch {}
+        Position(TOP_RIGHT, {
+          Using "load" StandardButton(Label(TEXT105))
+          Using "warlord" StandardButton(Label(TEXT106))
+        })
+      }
+    }
+    MarginRight(2, Using "erase" Position(BOTTOM_RIGHT, Height 20 Width 65 {
+        Button()
+        StandardButton(Label(TEXT107, 16, Rgb 200 100 100 255))
+    }))
+  }
+  Position(BOTTOM_STRETCHED, Height 10 Texture(HORI_BAR_MINI2))
+  LoadButtonSpacing()
+}
+End
+
+{
+  BlockEvents
+  ExitButtons()
+  Window({
+    FocusKeysVertical()
+    Width 600
+    Vertical {
+      MaxHeight 400
+        Using "games" Scrolling(MarginRight(10, List(VERTICAL, SavedGameContent())))
+      Stretch {}
+      Height 15 {}
+      Position(MIDDLE, Horizontal {
+        Using "new" StandardButton(Height 20 Label(TEXT43))
+        Width 15 {}
+        # Read-only: lists what the server has active, with each mod's author + description. There are no
+        # activate/remove callbacks in the data, so the mods template renders no buttons to change anything.
+        Using "mods" StandardButton(Height 20 Label(LOAD_MENU_MODS))
+      })
+    }
+  })
+}

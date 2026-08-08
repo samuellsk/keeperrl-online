@@ -1,0 +1,32 @@
+##########################################################################
+##### "modify append" is required at BOTH levels:
+#####   outer append -> keeps the group's other workshops (WORKSHOP, JEWELER...)
+#####   inner append -> keeps the vanilla FORGE recipes instead of replacing them
+#####
+##### "basic" and LAVA_FORGE need their own entries because inherit/append is a
+##### parse-time snapshot: vanilla already copied them before this file is read.
+##########################################################################
+
+"basic_without_lab" modify append
+{
+  "FORGE" modify append
+  {
+      {item = {"IronStaff"}       work = 15   cost = "IRON" 40   materialTab = true tech = "magical weapons"}
+  }
+  "LAVA_FORGE" modify append
+  {
+      {item = {"IronStaff"}       work = 15   cost = "IRON" 40   materialTab = true tech = "magical weapons"}
+  }
+}
+
+"basic" modify append
+{
+  "FORGE" modify append
+  {
+      {item = {"IronStaff"}       work = 15   cost = "IRON" 40   materialTab = true tech = "magical weapons"}
+  }
+  "LAVA_FORGE" modify append
+  {
+      {item = {"IronStaff"}       work = 15   cost = "IRON" 40   materialTab = true tech = "magical weapons"}
+  }
+}

@@ -1,0 +1,2 @@
+"Sam"
+"The necromancer trusts no one. Gives 4_necromancer his own villain groups (NECRO_KEEPER / NECRO_COTTAGES) with every ALLY entry removed, so former allies read as enemies on his map."

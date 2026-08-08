@@ -1,0 +1,13 @@
+Hellou and welcome to the KeeperRL Online.
+This version of KeeprRL is not an official version.
+It is a spin of or a mod if you prefer that allows other
+keepers to play in the same world and destroy each other.
+It is recommended for more experienced players.
+
+This version does not include graphics. It is strongly
+recommended that you buy official version and copy over
+data folder next to other data folders for graphical
+experience. Otherwise it will run in ASCII mode.
+
+If you find any bugs , please report them to discord.
+Thank you. Rar (Samuell)

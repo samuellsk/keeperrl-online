@@ -1,0 +1,17 @@
+# Mod load order. One mod folder name per line; '#' comments and blank lines ignored.
+#
+# Listed mods load FIRST, in this order. Any mod in mods/ that isn't listed is appended
+# afterwards, so you can drop in a new mod without touching this file. A listed mod that
+# isn't installed is skipped. Delete this file entirely -> plain alphabetical order.
+#
+# WHY: mods build on each other. If one mod adds a biome and a later mod adds villains for
+# that biome, the biome mod must be merged FIRST -- list it above the villain mod.
+#
+# NOTE: merging only ADDS keys it hasn't seen (ContentFactory::merge -> mergeMap), so for a
+# duplicate key the EARLIER mod here WINS. Order controls who defines a thing first; a later
+# mod cannot override an earlier one.
+#
+# Server-side only: the server publishes its manifest in this order and clients mirror the
+# server's order exactly, so every client agrees automatically.
+
+DevToolsA37

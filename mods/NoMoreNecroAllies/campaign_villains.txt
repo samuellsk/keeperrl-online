@@ -1,0 +1,46 @@
+# NoMoreNecroAllies -- ally-free villain groups for the necromancer.
+#
+# Vanilla and every mod's campaign_villains.txt are concatenated into ONE map, and vanilla is
+# parsed first, so these keys are simply added and may 'inherit' the vanilla groups above them.
+
+# A copy of vanilla EVIL_KEEPER with its only two ALLY entries removed:
+#     {{"map_dungeon1"} "DARK_ELVES_ALLY" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME21 ALLY}
+#     {{"map_dungeon1"} "GNOMES"          CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME22 ALLY}
+# Everything else is identical to vanilla. Spelled out in full rather than inherited because the
+# format has no "remove an entry" operation -- 'inherit' can only append to the list, never subtract.
+# If vanilla EVIL_KEEPER ever gains villains, they must be copied in here by hand.
+NECRO_KEEPER {
+    # Line goes like this:
+    # ViewId EnemyId Villain-name Villain-type [always present on campaign map (false by default)]
+    {{"map_castle1"} "KNIGHTS" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME MAIN}
+    {{"map_house_elf"} "ELVES" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME1 MAIN}
+    {{"map_dwarves"} "DWARVES" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME2 MAIN}
+    {{"map_dragon"} "RED_DRAGON" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME3 MAIN}
+    {{"map_white_dragon"} "WHITE_DRAGON" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME4 MAIN}
+    {{"map_tower1"} "ELEMENTALIST" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME5 MAIN}
+    {{"map_green_dragon"} "GREEN_DRAGON" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME6 MAIN}
+    {{"map_house1"} "LIZARDMEN" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME7 MAIN}
+    {{"map_warriors"} "WARRIORS" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME8 MAIN}
+    {{"map_thieves"} "THIEVES" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME9 MAIN}
+    {{"map_castle1"} "DEMON_DEN" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME10 MAIN}
+    {{"map_adoxie"} "MAIN_DUNGEON" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME11 MAIN true}
+
+    {{"map_ents"} "ENTS" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME12 LESSER}
+    {{"map_house_elf"} "DRIADS" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME13 LESSER}
+    {{"map_dungeon1"} "CYCLOPS" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME14 LESSER}
+    {{"map_ants"} "SHELOB" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME15 LESSER}
+    {{"map_hydra"} "HYDRA" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME16 LESSER}
+    {{"map_house_elf"} "UNICORN_HERD" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME17 LESSER}
+    {{"map_ants"} "ANTS_OPEN" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME18 LESSER}
+    {{"map_grave1"} "CEMETERY" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME19 LESSER}
+    {{"map_guard_house1"} "GUARD_POST" CAMPAIGN_VILLAINS_EVIL_KEEPER_NAME20 LESSER}
+
+    # No ALLY entries on purpose -- that is the whole point of this mod.
+}
+
+# NECRO_COTTAGES is vanilla EVIL_COTTAGES unchanged: EVIL_COTTAGES, and the COTTAGES it inherits,
+# contain NO ALLY entries at all, so there was nothing to strip. Inherited (not copied) so it keeps
+# tracking vanilla automatically. It exists so the necromancer has his own group to diverge later.
+# NOTE: "GOBLIN_CAVE_ALLY" in EVIL_COTTAGES is type MINOR despite its name -- it is not an ally and stays.
+NECRO_COTTAGES inherit EVIL_COTTAGES append {
+}

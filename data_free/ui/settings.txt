@@ -1,0 +1,72 @@
+
+Def UncheckedBox()
+{}
+End
+
+Def CheckedBox() {
+  Position(MIDDLE, Label(text = TEXT115, font = SYMBOL_FONT))
+}
+End
+
+Def TopButtonWidth() 220 End
+
+Def LineHighlight() MarginLeft(-7, MarginRight(-10, NewHighlight())) End
+
+{
+  BlockEvents
+  ExitButtons()
+  FocusKeysVertical()
+  WindowNoMargin(Width 700 Height 700 {
+    Vertical {
+      Height 10 {}
+      If "options"
+        Position(MIDDLE, Horizontal {
+          Width TopButtonWidth() StandardButtonActivated(Label(TEXT54))
+          Width 15 {}
+          Using "set_keys" Width TopButtonWidth() StandardButton(Label(TEXT55))
+        })
+      If "keybindings"
+        Position(MIDDLE, Horizontal {
+          Using "set_options" Width TopButtonWidth() StandardButton(Label(TEXT54))
+          Width 15 {}
+          Width TopButtonWidth() StandardButtonActivated(Label(TEXT55))
+        })
+      Height 10 {}
+      Stretch Scrolling(Margins(15, MarginRight(10, {
+        Using "options"
+          List(VERTICAL, {
+              Using "callbackBool" { Focusable LineHighlight() Button() }
+              Using "tooltip" GetTooltip(Paragraph(800))
+              Using "sliderKeys"
+                FocusableKeys LineHighlight()
+              Height 35 Horizontal {
+                Stretch Position(MIDDLE_STRETCHED_X, Using "name" Label())
+                {
+                  Width 30 Height 30 {
+                    Using "yes" CheckedBox()
+                    Using "no" UncheckedBox()
+                  }
+                  Using "sliderData"
+                    Width 120 Height 30 Sliding()
+                  Height 25 Horizontal{
+                    Using "decrease" StandardButton(Label(TEXT51))
+                    Using "value" MinWidth 65 Position(MIDDLE, Label())
+                    Using "increase" StandardButton(Label(TEXT52))
+                  }
+                }
+              }
+          })
+
+        Using "keybindings"
+          List(VERTICAL, Height 35 {
+              Using "label" Position(LEFT_CENTERED,Label())
+              Using "key" Position(RIGHT_CENTERED, Width 150 Label())
+              Using "clicked" Button(false)
+          })
+      })))
+      Height 10 {}
+      Using "reset_keys" Position(MIDDLE, StandardButton(Label(TEXT56)))
+      Height 10 {}
+    }
+  })
+}

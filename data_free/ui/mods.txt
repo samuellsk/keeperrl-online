@@ -1,0 +1,55 @@
+
+
+Def ModLabel()
+  Height 25 {
+    Using "choose" { Focusable {} BlockMouseEvents({MOVED}) }
+    Using "selected" NewHighlight()
+    Using "active" MarginLeft(-18, Label(text = TEXT115, font = SYMBOL_FONT, color = ColorId GREEN))
+    Using "name" Scissor Label()
+    Using "choose" Button()
+  }
+End
+
+Def ModList(Title)
+MarginLeft(18, Vertical {
+  Height 25 Label(Title, 19, ColorId YELLOW)
+  List(VERTICAL, ModLabel())
+  Height 10 {}
+})
+End
+
+{
+  BlockEvents
+  ExitButtons()
+  FocusKeysVertical()
+  WindowNoMargin(Width 900 Height 700 MarginTop(15, MarginBottom(15, {
+    Horizontal {
+      Width 300 Scrolling(0, Vertical {
+          Using "local" ModList(TEXT114)
+          Using "subscribed" ModList(TEXT116)
+          Using "online" ModList(TEXT117)
+          Height 10 {}
+          MarginLeft(18, MarginRight(18, Using "create_new" StandardButtonNotFocusable(Label(TEXT44))))
+      })
+      Width 30 {}
+      Using "selected_mod" Vertical {
+        Using "name" Label()
+        Horizontal {
+          Using "author" MarginTop(3, Label(size = 14, color = ColorId LIGHT_GRAY))
+          Width 15 {}
+          Using "stars" List(HORIZONTAL, Label(font = SYMBOL_FONT, color = ColorId YELLOW))
+        }
+        Height 15 {}
+        Stretch Using "description" Scrolling(1, MarginRight(30, Paragraph(520)))
+        Horizontal {
+          Using "Activate" KeybindingButton(TEXT118, MENU_SELECT)
+          Using "Deactivate" KeybindingButton(TEXT119, MENU_SELECT)
+          Using "Download" KeybindingButton(TEXT120, MENU_SELECT)
+          Using "Update" StandardButtonNotFocusable(Label(UPDATE_BUTTON))
+          Using "Upload" StandardButtonNotFocusable(Label(UPLOAD_BUTTON))
+          Using "show_workshop" StandardButtonNotFocusable(Label(TEXT45))
+        }
+      }
+    }
+  })))
+}

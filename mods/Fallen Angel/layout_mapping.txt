@@ -1,0 +1,15 @@
+"default" modify append {
+  "floor2" Place "FLOOR"
+  "abyssus_fa_wall" { ClearFurniture Place "FLOOR" Place "ABYSSUS_FA_MAGMA_WALL" }
+  "abyssus_fa_floor_1" Place "ABYSSUS_FA_FLOOR_1"
+  "abyssus_fa_floor_2" Place "ABYSSUS_FA_FLOOR_2"
+  "abyssus_fa_floor_3" Place "ABYSSUS_FA_FLOOR_3"
+  "abyssus_fa_floor_4" Place "ABYSSUS_FA_FLOOR_4"
+  "abyssus_fa_floor_random" Place "FLOOR"
+  "abyssus_fa_torch_on_wall" Place "ABYSSUS_FA_TORCH_ON_THE_WALL_CONTROLLER"
+  "abyssus_fa_bookcase_wood" Place "ABYSSUS_FA_BOOKCASE_WOOD"
+  "abyssus_fa_training_wood" Place "ABYSSUS_FA_TRAINING_WOOD"
+  "abyssus_fa_dining" Place "ABYSSUS_FA_DINING_TABLE_SMALL"
+  "abyssus_fa_gate" Place "ABYSSUS_FA_GATE"
+  "abyssus_fa_door" Place "ABYSSUS_FA_DOOR"
+}

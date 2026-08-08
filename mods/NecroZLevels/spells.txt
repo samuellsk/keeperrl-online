@@ -1,0 +1,14 @@
+"i am zombie worker"
+{
+  symbol = "W"
+  effect = Name "become a worker" Description "minion will become a worker and will start hauling,digging and constructing" {
+    AI Health 0 1 0 1 {
+      AddMinionTrait WORKER
+      Filter MinionTrait WORKER {
+        RemoveAbility "i am zombie worker"
+      }
+    }
+  }
+  message = "" ""
+  cooldown = 15
+}

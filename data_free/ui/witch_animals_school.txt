@@ -1,0 +1,12 @@
+Def LEVEL_LABEL(NUM)
+Label(SPELL_LEVEL(NUM)) Label(":") Width 10 {}
+End
+
+Def VIEW_ID(TEXT) ViewId(1, {TEXT}) Width 10 {} End
+
+MiniWindow(Vertical {
+  Height 26 Horizontal { LEVEL_LABEL("1") VIEW_ID("spider") Label(SUMMON_EFFECT_NAME(MAKE_PLURAL(CREATURE_ATTRIBUTES_SPIDER_NAME))) }
+  Height 26 Horizontal { LEVEL_LABEL("2") VIEW_ID("snake") Label(SUMMON_EFFECT_NAME(MAKE_PLURAL(CREATURE_ATTRIBUTES_SNAKE_NAME))) }
+  Height 26 Horizontal { LEVEL_LABEL("3") VIEW_ID("lizard") Label(SUMMON_EFFECT_NAME(MAKE_PLURAL(CREATURE_ATTRIBUTES_LIZARD_NAME))) }
+  Height 26 Horizontal { LEVEL_LABEL("4") VIEW_ID("kraken_head") Label(SUMMON_EFFECT_NAME(KRAKEN)) }
+})

@@ -1,0 +1,64 @@
+"abyssus_fa_initial_workers"
+{
+  {
+    ids = { "ABYSSUS_FA_WORKER" }
+    traits = { WORKER FIGHTER }
+    initialRecruitment = 2
+    invisible = true
+    spawnLocation = NearLeader
+    noAuto = true
+  }
+}
+
+"abyssus_fa"
+{
+  {
+    ids = { "ABYSSUS_FA_WORKER" }
+    traits = { WORKER FIGHTER }
+    noAuto = true
+    spawnLocation = FurnitureType "ABYSSUS_FA_SUMMONING_PORTAL"
+    requirements = {
+      { 0.0 AttractionInfo 1 {FurnitureType "ABYSSUS_FA_SUMMONING_CIRCLE" }}
+    }
+  }
+  {
+    ids = { "ABYSSUS_FA_MONOCULUS" }
+    traits = { FIGHTER }
+    noAuto = true
+    spawnLocation = FurnitureType "ABYSSUS_FA_SUMMONING_PORTAL"
+    frequency = 1
+    requirements = {
+      { 0.0 AttractionInfo 1 {FurnitureType "ABYSSUS_FA_SUMMONING_CIRCLE" }}
+    }
+  }
+  {
+    ids = { "ABYSSUS_FA_VOIDCALL_BOLTMAIDEN" }
+    traits = { FIGHTER }
+    spawnLocation = FurnitureType "ABYSSUS_FA_SUMMONING_PORTAL"
+    requirements = {
+      { 0.0 AttractionInfo 1 {FurnitureType "ABYSSUS_FA_SUMMONING_CIRCLE" }}
+      { 0.0 MinTurnRequirement 1500 }
+    }
+    frequency = 0.7
+  }
+  {
+    ids = { "ABYSSUS_FA_VOIDCALL_ENCHANTRESS" }
+    traits = { FIGHTER }
+    spawnLocation = FurnitureType "ABYSSUS_FA_SUMMONING_PORTAL"
+    requirements = {
+      { 0.0 AttractionInfo 1 {FurnitureType "ABYSSUS_FA_SUMMONING_CIRCLE" }}
+      { 0.0 MinTurnRequirement 3000 }
+    }
+    frequency = 0.7
+  }
+  {
+    ids = { "ABYSSUS_FA_RIFTSHARD_BRUTE" }
+    traits = { FIGHTER }
+    spawnLocation = FurnitureType "ABYSSUS_FA_SUMMONING_PORTAL"
+    requirements = {
+      { 0.0 AttractionInfo 1 {FurnitureType "ABYSSUS_FA_SUMMONING_CIRCLE" }}
+      { 0.0 MinTurnRequirement 6000 }
+    }
+    frequency = 0.3
+  }
+}

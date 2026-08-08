@@ -1,0 +1,225 @@
+# Every tribe and its friend/foe graph. Was hardcoded in tribe.cpp Tribe::generateTribes(); now content.
+#
+#   "NAME" { enemyOfAll = true  allies = { "OTHER" ... }  diplomatic = true|false  keeperTribe = true }
+#
+# ONE UNIFORM SHAPE, ON PURPOSE. Every tribe below is `enemyOfAll = true` and then names the tribes it is
+# FRIENDLY with. Nothing is left implicit:
+#
+# - enemyOfAll  = hostile to every tribe that exists, including ones added later by a mod. A tribe is never
+#                 hostile to itself, so this is safe on its own.
+# - allies      = the exceptions, applied AFTER all hostility is wired, so an ally link can never be undone
+#                 by someone else's enemyOfAll. MUTUAL -- listing GNOME under DARK_KEEPER also makes
+#                 DARK_KEEPER an ally of GNOME. Both sides are spelled out anyway so each entry reads alone.
+# - enemies     = no longer used here. It is still supported (and still mutual) if you prefer the old style,
+#                 but mixing the two is what made this file hard to read: see the commented original below.
+# - diplomatic (default true): tracks per-creature standing -- attacking one member turns that individual
+#                 hostile. A non-diplomatic tribe is purely static friend/foe.
+# - keeperTribe = a player-keeper tribe. Its minions dig only where ordered and never use hostile-dig.
+#
+# WHY THIS SHAPE: with enemy lists, ADDING a tribe meant editing every other entry that should hate it, and
+# forgetting one silently made them friends. Here a new tribe is hostile to everything by default and you
+# only ever add it to the `allies` of whoever should tolerate it -- one edit, in one place, and never a
+# silent friendship. The graph below is IDENTICAL to the enemy-list version it replaces (verified with
+# `keeper.exe --dump_tribes`, which prints the full matrix -- diff it before and after any edit).
+#
+# The engine references some of these ids by name (see tribe.h: MONSTER, HOSTILE, DARK_KEEPER, WHITE_KEEPER,
+# RETIRED_KEEPER, INVADER, WILDLIFE, PEACEFUL, PEST, HUMAN, BANDIT). Do not rename those. ELF, DARK_ELF,
+# DWARF, GNOME, LIZARD, GREENSKIN, ANT and SHELOB are referenced only by content, so they are yours to change.
+
+
+# --- keepers -- a keeper tribe fights the world; its friends are named, never assumed ---
+"DARK_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
+  allies = { "DARK_ELF" "GNOME" "GREENSKIN" "PEACEFUL" }
+}
+"WHITE_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
+  allies = { "DWARF" "ELF" "GNOME" "HUMAN" "PEACEFUL" }
+}
+"RETIRED_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
+  allies = {
+      "ANT" "BANDIT" "DARK_ELF" "DWARF" "ELF" "GNOME" "GREENSKIN" "HUMAN" "LIZARD" "MONSTER" "PEACEFUL" "PEST"
+      "WILDLIFE"
+  }
+}
+"INVADER" {
+  diplomatic = false
+  enemyOfAll = true
+  # no allies: hostile to everything, including every other enemyOfAll tribe
+}
+
+# --- factions -- the ordinary inhabitants of the world ---
+"HUMAN" {
+  enemyOfAll = true
+  allies = { "DWARF" "ELF" "GNOME" "PEACEFUL" "PEST" "RETIRED_KEEPER" "WHITE_KEEPER" "WILDLIFE" }
+}
+"ELF" {
+  enemyOfAll = true
+  allies = {
+      "ANT" "DARK_ELF" "GNOME" "GREENSKIN" "HUMAN" "LIZARD" "MONSTER" "PEACEFUL" "PEST" "RETIRED_KEEPER"
+      "WHITE_KEEPER" "WILDLIFE"
+  }
+}
+"DARK_ELF" {
+  enemyOfAll = true
+  allies = {
+      "ANT" "DARK_KEEPER" "ELF" "GNOME" "GREENSKIN" "LIZARD" "MONSTER" "PEACEFUL" "PEST" "RETIRED_KEEPER"
+      "WILDLIFE"
+  }
+}
+"DWARF" {
+  enemyOfAll = true
+  allies = {
+      "ANT" "GNOME" "GREENSKIN" "HUMAN" "LIZARD" "MONSTER" "PEACEFUL" "PEST" "RETIRED_KEEPER" "WHITE_KEEPER"
+      "WILDLIFE"
+  }
+}
+"GNOME" {
+  enemyOfAll = true
+  allies = {
+      "ANT" "DARK_ELF" "DARK_KEEPER" "DWARF" "ELF" "GREENSKIN" "HUMAN" "LIZARD" "MONSTER" "PEACEFUL" "PEST"
+      "RETIRED_KEEPER" "WHITE_KEEPER" "WILDLIFE"
+  }
+}
+"GREENSKIN" {
+  diplomatic = true
+  enemyOfAll = true
+  allies = {
+      "ANT" "BANDIT" "DARK_ELF" "DARK_KEEPER" "DWARF" "ELF" "GNOME" "LIZARD" "MONSTER" "PEACEFUL" "PEST"
+      "RETIRED_KEEPER" "WILDLIFE"
+  }
+}
+"LIZARD" {
+  enemyOfAll = true
+  allies = {
+      "ANT" "BANDIT" "DARK_ELF" "DWARF" "ELF" "GNOME" "GREENSKIN" "PEACEFUL" "PEST" "RETIRED_KEEPER"
+      "WILDLIFE"
+  }
+}
+"ANT" {
+  enemyOfAll = true
+  allies = {
+      "BANDIT" "DARK_ELF" "DWARF" "ELF" "GNOME" "GREENSKIN" "LIZARD" "MONSTER" "PEACEFUL" "PEST"
+      "RETIRED_KEEPER" "WILDLIFE"
+  }
+}
+"BANDIT" {
+  enemyOfAll = true
+  allies = { "ANT" "GREENSKIN" "LIZARD" "PEACEFUL" "PEST" "RETIRED_KEEPER" "WILDLIFE" }
+}
+
+# --- creatures and hostiles ---
+"MONSTER" {
+  diplomatic = false
+  enemyOfAll = true
+  allies = { "ANT" "DARK_ELF" "DWARF" "ELF" "GNOME" "GREENSKIN" "PEACEFUL" "PEST" "RETIRED_KEEPER" }
+}
+"SHELOB" {
+  diplomatic = false
+  enemyOfAll = true
+  # no allies: hostile to everything, including every other enemyOfAll tribe
+}
+"HOSTILE" {
+  diplomatic = false
+  enemyOfAll = true
+  # no allies: hostile to everything, including every other enemyOfAll tribe
+}
+"PEST" {
+  diplomatic = false
+  enemyOfAll = true
+  allies = {
+      "ANT" "BANDIT" "DARK_ELF" "DWARF" "ELF" "GNOME" "GREENSKIN" "HUMAN" "LIZARD" "MONSTER" "PEACEFUL"
+      "RETIRED_KEEPER" "WILDLIFE"
+  }
+}
+"WILDLIFE" {
+  diplomatic = false
+  enemyOfAll = true
+  allies = {
+      "ANT" "BANDIT" "DARK_ELF" "DWARF" "ELF" "GNOME" "GREENSKIN" "HUMAN" "LIZARD" "PEACEFUL" "PEST"
+      "RETIRED_KEEPER"
+  }
+}
+# The one tribe that is the OTHER way round, so it uses the mirror flag: nobody fights PEACEFUL (the sokoban
+# boulder, layout_mapping's PeacefulCreature, the armour shop) except the three that fight everything. Written
+# as allyToAll + 3 exceptions instead of enemyOfAll + 15 allies -- same graph, and a tribe added later is
+# automatically tolerated rather than needing to be appended here.
+"PEACEFUL" {
+  diplomatic = false
+  allyToAll = true
+  enemies = { "HOSTILE" "INVADER" "SHELOB" }
+}
+
+# ==========================================================================================================
+# THE ORIGINAL, VERBATIM. Kept for reference and for restoring the old style; the graph it produces
+# is exactly the one above -- this is a rewrite of the NOTATION, not of any relationship.
+# ==========================================================================================================
+# # Every tribe and its friend/foe graph. Was hardcoded in tribe.cpp Tribe::generateTribes(); now content.
+# #
+# #   "NAME" { enemies = { "OTHER" ... } diplomatic = true|false }
+# #
+# # - enemies is MUTUAL: listing HUMAN under DARK_KEEPER also makes DARK_KEEPER an enemy of HUMAN. Only list an
+# #   edge once (either side). A tribe not named in anyone's enemies list is friendly with everyone.
+# # - diplomatic (default true): a diplomatic tribe tracks per-creature standing -- attacking one of its members
+# #   turns that individual hostile. A non-diplomatic tribe is purely static friend/foe.
+# # - The engine references these built-in ids by name (keeper tribes, INVADER, WILDLIFE, ...), so don't rename
+# #   them; ADD your own (UNDEAD, DEMONS, ...) as new entries with their own enemy lists.
+#
+# # --- keepers ---
+# "DARK_KEEPER" {
+#   diplomatic = false
+#   keeperTribe = true
+#   enemies = { "WHITE_KEEPER" "ELF" "DWARF" "HUMAN" "LIZARD" "PEST" "MONSTER" "BANDIT" "ANT" "RETIRED_KEEPER" "WILDLIFE" }
+# }
+# "WHITE_KEEPER" {
+#   diplomatic = false
+#   keeperTribe = true
+#   enemies = { "MONSTER" "PEST" "BANDIT" "DARK_ELF" "GREENSKIN" "ANT" "RETIRED_KEEPER" "LIZARD" "WILDLIFE" }
+# }
+# "RETIRED_KEEPER" { diplomatic = false keeperTribe = true }
+#
+# # INVADER: the transient tribe a keeper's invading team is retagged to. enemyOfAll = hostile to EVERY other
+# # tribe (allied only with itself), so it fights the defender keeper and everything in the target dungeon --
+# # and any tribe added later is automatically its enemy too, no edit here.
+# "INVADER" {
+#   diplomatic = false
+#   enemyOfAll = true
+# }
+#
+# # --- factions ---
+# "HUMAN"    { enemies = { "LIZARD" "BANDIT" "ANT" "DARK_ELF" "GREENSKIN" } }
+# "ELF"      { enemies = { "DWARF" "BANDIT" } }
+# "DARK_ELF" { enemies = { "DWARF" "BANDIT" } }
+# "DWARF"    { enemies = { "BANDIT" } }
+# "GNOME"    { enemies = { "BANDIT" } }
+# "LIZARD"   {}
+# "GREENSKIN" { diplomatic = true }
+# "ANT"      {}
+# "BANDIT"   {}
+#
+# # --- non-diplomatic / hostile things ---
+# "MONSTER" {
+#   diplomatic = false
+#   enemies = { "WILDLIFE" "HUMAN" "BANDIT" "LIZARD" }
+# }
+# "SHELOB" {
+#   diplomatic = false
+#   enemies = { "GREENSKIN" "MONSTER" "LIZARD" "PEST" "WILDLIFE" "ELF" "HUMAN" "DWARF" "GNOME" "WHITE_KEEPER"
+#       "DARK_KEEPER" "BANDIT" "PEACEFUL" "ANT" "DARK_ELF" "RETIRED_KEEPER" }
+# }
+# "HOSTILE" {
+#   diplomatic = false
+#   enemyOfAll = true
+#   enemies = { "GREENSKIN" "MONSTER" "LIZARD" "PEST" "WILDLIFE" "ELF" "HUMAN" "DWARF" "GNOME" "WHITE_KEEPER"
+#       "DARK_KEEPER" "BANDIT" "PEACEFUL" "ANT" "DARK_ELF" "SHELOB" "RETIRED_KEEPER" }
+# }
+# "PEST"     { diplomatic = false }
+# "WILDLIFE" { diplomatic = false }
+# "PEACEFUL" { diplomatic = false }

@@ -1,0 +1,15 @@
+# In-game rules wall. Shown once when a NEW keeper starts, at turn 0.
+# The CONTENT is not here -- it is plain text in game_config/game_message.txt, and an empty or missing
+# file means this window never appears. Each line of that file arrives as its own row, so blank lines and
+# line breaks are preserved instead of being reflowed into one paragraph.
+# Scrolling + MaxHeight: a long announcement grows a scrollbar rather than running off the screen.
+# Structure mirrors message_board.txt (Using -> Scrolling -> List) and present_text.txt (Window sizing).
+{
+  BlockEvents
+  ExitButtonsWithEnter()
+  Window(Width 700 MaxHeight 700 {
+    Using "lines" Scrolling(List(VERTICAL, {
+      Using "text" Paragraph(640)
+    }))
+  })
+}

@@ -1,0 +1,4 @@
+# Point 4_necromancer towards different zlevel groups that will actually benefit him.
+"4_necromancer" modify {
+  zLevelGroups = { "basic_necro" "evil_necro" }
+}

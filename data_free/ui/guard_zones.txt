@@ -1,0 +1,23 @@
+
+Def P(Text) Paragraph(500, Text) End
+
+MiniWindow(Scrolling(MarginRight(30, MarginLeft(30,  
+  Vertical {
+    Horizontal{ViewId(1, {"guard_post"}) Width 10 {} Label(TEXT42)}
+    Height 30 {}
+    P(TEXT150)
+    Height 15 {}
+    P(TEXT151)
+    Height 15 {}
+    Position(MIDDLE, Texture("guard_zones1"))
+    Height 15 {}
+    Position(MIDDLE, Texture("guard_zones2"))
+    Height 15 {}
+    P(TEXT152)
+    Height 15 {}
+    Position(MIDDLE, Texture("guard_zones3"))
+    Height 15 {}
+    P(TEXT153)
+    Height 15 {}
+  }
+))))
