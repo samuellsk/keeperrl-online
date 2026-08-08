@@ -9,6 +9,7 @@
 
 struct EnemyInfo;
 class EnemyFactory;
+class CreatureFactory;
 
 RICH_ENUM(LevelConnectionDir, UP, DOWN);
 
@@ -61,6 +62,7 @@ struct EnemyInfo {
       optional<LevelConnection> = none);
   void updateBuildingInfo(const map<BuildingId, BuildingInfo>&);
   optional<BiomeId> getBiome() const;
+  optional<TString> getDisplayName(const CreatureFactory*) const;
   STRUCT_DECLARATIONS(EnemyInfo)
   SERIALIZATION_DECL(EnemyInfo)
   EnemyInfo& setVillainType(VillainType type);

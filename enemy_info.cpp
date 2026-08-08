@@ -1,5 +1,7 @@
 #include "enemy_info.h"
 #include "immigrant_info.h"
+#include "creature_factory.h"
+#include "creature_list.h"
 
 SERIALIZE_DEF(EnemyInfo, NAMED(settlement), OPTION(config), NAMED(behaviour), NAMED(levelConnection), OPTION(immigrants), OPTION(discoverable), NAMED(createOnBones), OPTION(biome), NAMED(otherEnemy))
 
@@ -17,6 +19,30 @@ void EnemyInfo::updateBuildingInfo(const map<BuildingId, BuildingInfo>& info) {
         [&](const Predefined& elem) { const_cast<Predefined&>(elem).buildingInfo = info.at(elem.buildingId); },
         [&](const RandomLayout&) {}
   );
+}
+
+static optional<CreatureId> firstCreature(const CreatureList& list) {
+  if (!list.uniques.empty())
+    return list.uniques[0];
+  if (!list.all.empty())
+    return list.all[0].second;
+  return none;
+}
+
+// Who this enemy IS, worked out from the definition alone -- no Collective and no generated creatures needed.
+// A settled villain gets its name from CollectiveBuilder::generateName once its creatures exist, but a
+// world-map villain the player has never travelled to has neither, so anything that has to name it before then
+// (the RAR villain panel, an incoming wave) needs this. Same order of preference as generateName: the
+// settlement's race first, then whoever leads it.
+// Returns none when the definition names neither -- the caller decides what to fall back to.
+optional<TString> EnemyInfo::getDisplayName(const CreatureFactory* factory) const {
+  if (settlement.race)
+    return *settlement.race;
+  if (auto id = firstCreature(settlement.inhabitants.leader))
+    return factory->getName(*id);
+  if (auto id = firstCreature(settlement.inhabitants.fighters))
+    return factory->getName(*id);
+  return none;
 }
 
 optional<BiomeId> EnemyInfo::getBiome() const {

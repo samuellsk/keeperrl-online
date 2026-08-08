@@ -2149,6 +2149,10 @@ void PlayerControl::refreshGameInfo(GameInfo& gameInfo) const {
       if (!villain || campaign.isDefeated(pos))
         continue;
       VillageInfo::Village info;
+      // The campaign villain's own name is only a map CATEGORY -- "Cave", "Cottage", "Shop" -- shared by every
+      // enemy that lives in one, so on its own it told the player nothing about who they were dealing with
+      // (a dark elf cave read as just "Cave"). Name it from the enemy definition, exactly as the panel would
+      // once the villain has a real collective, and keep the category only as a last resort.
       info.name = villain->name;
       // The icon must be WHO is coming, not where they live: use the villain's LEADER creature (what the
       // vanilla panel shows via the collective's name viewId), falling back to its fighters, and only to the
@@ -2162,6 +2166,8 @@ void PlayerControl::refreshGameInfo(GameInfo& gameInfo) const {
           info.viewId = inhabitants.leader.getViewId(&creatureFactory);
         else if (!inhabitants.fighters.empty())
           info.viewId = inhabitants.fighters.getViewId(&creatureFactory);
+        if (auto name = enemyIt->second.getDisplayName(&creatureFactory))
+          info.name = *name;
       }
       info.type = villain->getDisplayType();   // a converted ally reads as LESSER; mechanically it stays MINOR
       info.access = VillageInfo::Village::LOCATION;

@@ -510,7 +510,11 @@ void Game::considerVillainWaves() {
            << "/" << waveSize << " attackers";
       if (!attackers.empty()) {
         state.attackers = attackers;   // panel shows red "attacking" while any of these are still alive
-        player->getControl()->addAttack(CollectiveAttack({taskRef}, villain->name,
+        // Name the attackers, not their address: villain->name is the world-map category ("Cave"), so the
+        // message read "You are under attack by Cave". Vanilla passes the collective's full name here, which
+        // for a settled villain resolves to its race -- getDisplayName gets to the same answer without one.
+        auto attackerName = capitalFirst(info.getDisplayName(&creatureFactory).value_or(villain->name));
+        player->getControl()->addAttack(CollectiveAttack({taskRef}, attackerName,
             wave.getViewId(&creatureFactory), attackers));
       }
       continue;
