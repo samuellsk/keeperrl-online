@@ -1,2 +1,0 @@
-"Sam"
-"Adds Iron Staff back to forge that was removed in 1.0 update"

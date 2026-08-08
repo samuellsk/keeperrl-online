@@ -1,3 +1,0 @@
-##### Items
-{ "iron_staff" ")" ColorId ORANGE }
-{ viewId = "iron_staff_v" symbol = ")" color = ColorId ORANGE weaponOrigin = {11 14} }

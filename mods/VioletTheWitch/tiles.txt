@@ -1,1 +1,0 @@
-{ viewId = "violet_the_witch" symbol = "n" color = ColorId GREEN weaponOrigin = {3 13} }
