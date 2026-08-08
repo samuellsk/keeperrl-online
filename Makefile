@@ -200,4 +200,4 @@ depends: $(PCH)
 # keeper_updater: standalone integrity checker/repairer, run BEFORE the game. Shares NO game code so it keeps
 # working against versions whose content format changed. Only libcurl + rar_hash.h.
 keeper_updater: keeper_updater.cpp rar_hash.h
-	$(CC) -std=c++1y -O2 -o keeper_updater keeper_updater.cpp -lcurl
+	$(GCC) -std=c++1y -O2 -o keeper_updater keeper_updater.cpp -lcurl

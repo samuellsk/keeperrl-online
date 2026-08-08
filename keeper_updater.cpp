@@ -35,6 +35,8 @@
 #else
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/stat.h>   // mkdir(), used by makeParentDirs on POSIX
+#include <sys/types.h>
 #endif
 
 namespace {
