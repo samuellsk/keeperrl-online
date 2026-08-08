@@ -1,0 +1,10 @@
+# Store and check out every file BYTE FOR BYTE, with no line-ending translation.
+#
+# This is not a style preference, it is a correctness requirement. keeper_updater verifies each file against
+# a SHA-256 in manifest-data_free.txt and repairs anything that differs. If git rewrote CRLF to LF on commit
+# (or back on checkout), the bytes a player downloads would not match the bytes the manifest was generated
+# from, every text file would look "modified", and the updater would try -- and fail -- to repair all of them.
+#
+# Symptom when this is missing: "FAILED to fetch a good copy of <file>" for every text file, because the
+# downloaded copy hashes differently from the manifest entry.
+* -text
