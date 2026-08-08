@@ -107,9 +107,9 @@ endif
 
 
 ifdef STEAMWORKS
-SRCS = $(shell ls -t *.cpp)
+SRCS = $(shell ls -t *.cpp | grep -v keeper_updater)
 else
-SRCS = $(shell ls -t *.cpp | grep -v steam_.*.cpp)
+SRCS = $(shell ls -t *.cpp | grep -v steam_.*.cpp | grep -v keeper_updater)
 endif
 SRCS += $(shell ls -t extern/*.cpp)
 
@@ -196,3 +196,8 @@ depends: $(PCH)
 		'{}.cpp' -MM -MF $(OBJDIR)/'{}'.d -MT $(OBJDIR)/'{}'.o -E > /dev/null
 
 -include $(DEPS)
+
+# keeper_updater: standalone integrity checker/repairer, run BEFORE the game. Shares NO game code so it keeps
+# working against versions whose content format changed. Only libcurl + rar_hash.h.
+keeper_updater: keeper_updater.cpp rar_hash.h
+	$(CC) -std=c++1y -O2 -o keeper_updater keeper_updater.cpp -lcurl

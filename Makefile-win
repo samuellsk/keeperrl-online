@@ -75,9 +75,9 @@ IPATH = -I. -I./extern -Iextern/steamworks/public
 CFLAGS += $(IPATH)
 
 ifdef STEAMWORKS
-SRCS = $(shell ls -t *.cpp)
+SRCS = $(shell ls -t *.cpp | grep -v keeper_updater)
 else
-SRCS = $(shell ls -t *.cpp | grep -v steam_.*.cpp)
+SRCS = $(shell ls -t *.cpp | grep -v steam_.*.cpp | grep -v keeper_updater)
 endif
 
 ifdef UNITY
@@ -118,7 +118,7 @@ all:
 	bash ./gen_version.sh
 	@$(MAKE) -f Makefile-win --no-print-directory compile
 
-compile: gen_version $(NAME)
+compile: gen_version $(NAME) keeper_updater.exe
 
 stdafx.h.gch: stdafx.h $(wildcard *.h)
 	$(GCC) -MMD $(CFLAGS) -c $< -o $@
@@ -151,3 +151,10 @@ clean:
 	$(RM) unity.cpp
 
 -include $(DEPS)
+
+# keeper_updater: standalone integrity checker/repairer, run BEFORE the game. Deliberately shares NO game
+# code -- it must keep working against versions whose content format changed. Only libcurl + rar_hash.h.
+keeper_updater.exe: keeper_updater.cpp rar_hash.h
+	$(CC) -std=c++1y -O2 -o keeper_updater.exe keeper_updater.cpp -lcurl -lws2_32
+
+updater: keeper_updater.exe

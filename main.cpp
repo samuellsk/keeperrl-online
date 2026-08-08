@@ -74,7 +74,8 @@
 #include "rar_server.h"
 #include "rar_lockstep_net.h"
 #include "rar_client.h"
-#include "rar_mods.h"   // rarHashDataFree: our data_free fingerprint, reported at login
+#include "rar_mods.h"
+#include "rar_integrity.h"  // runs keeper_updater before any data_free file is read   // rarHashDataFree: our data_free fingerprint, reported at login
 
 #ifdef USE_STEAMWORKS
 #include "steam_base.h"
@@ -129,6 +130,7 @@ vector<pair<MusicType, FilePath>> getMusicTracks(const DirectoryPath& path, bool
       {MusicType::ADV_PEACEFUL, path.file("adv_peaceful5.ogg")},
   };
 }
+
 
 static int keeperMain(po::parser&);
 static po::parser getCommandLineFlags();
@@ -308,15 +310,26 @@ struct AppConfig {
   map<string, string> values;
 };
 
+// Caption shown under the logo while the startup thread works. Written by that thread, read by the render
+// loop below, so it must be atomic-ish: a plain pointer swap to a string literal is fine here (both are
+// pointer-sized and it is only ever set to compile-time constants).
+static std::atomic<const char*> splashCaption { nullptr };
+
 static void showLogoSplash(Renderer& renderer, FilePath logoPath, atomic<bool>& splashDone) {
   auto logoTexture = Texture::loadMaybe(logoPath);
   while (!splashDone) {
     renderer.drawAndClearBuffer();
     sleep_for(milliseconds(30));
+    Vec2 logoBottom = renderer.getSize() / 2;
     if (logoTexture) {
       auto pos = (renderer.getSize() - logoTexture->getSize()) / 2;
       renderer.drawImage(pos.x, pos.y, *logoTexture);
+      logoBottom = Vec2(renderer.getSize().x / 2, pos.y + logoTexture->getSize().y + 20);
     }
+    // Without this a double-clicked player stares at a logo with no idea why it is taking time -- the
+    // integrity check can reach out to the network, so the wait is not always instant.
+    if (auto caption = splashCaption.load())
+      renderer.drawText(Color::WHITE, logoBottom, caption, Renderer::CenterType::HOR);
   }
 }
 
@@ -418,10 +431,8 @@ static int keeperMain(po::parser& commandLineFlags) {
       appConfig.getMaybe<string>("server_psk").value_or(""),
       appConfig.getMaybe<string>("server_list_url").value_or(""));
   rarSetSaveRegistry(userPath.file("rar_saves.txt").getPath());
-  // RAR data protection: hash our own rule files once here (paths are known, nothing has been loaded yet) and
-  // hand it to the client layer, which sends it with every login. The server compares against its own copy and
-  // records who is running altered content. Purely informational to us -- the server decides what to do.
-  rarSetDataFreeHash(rarHashDataFree(freeDataPath.getPath()));
+
+
   if (commandLineFlags["rar_client_test"].was_set())
     return rarClientSelfTest();
   if (commandLineFlags["rar_lockstep_nettest"].was_set())
@@ -809,7 +820,17 @@ static int keeperMain(po::parser& commandLineFlags) {
   UserInfoLog.addOutput(DebugOutput::toString([&renderer](const string& s) { renderer.showError(s);}));
   atomic<bool> splashDone { false };
   SoundLibrary* soundLibrary = nullptr;
+  int integrityResult = -1;
   auto loadThread = makeThread([&] {
+    // Integrity check FIRST, and on this thread so the logo splash keeps drawing while it runs. It must
+    // finish before Translations/TileSet/ContentFactory read data_free below, or a repair would not take
+    // effect until the next launch. loadThread.join() right after the splash guarantees that ordering.
+    splashCaption = "Checking installation integrity...";
+    integrityResult = rarRunIntegrityCheck();
+    if (integrityResult == 10)
+      splashCaption = "Repaired altered game files.";
+    else if (integrityResult == 30)
+      splashCaption = "Some game files could NOT be repaired.";
     if (tilesPresent && !audioError) {
       soundLibrary = new SoundLibrary(audioDevice, paidDataPath.subdirectory("sound"));
       options.addTrigger(OptionId::SOUND, [&soundLibrary](int volume) {
@@ -823,6 +844,13 @@ static int keeperMain(po::parser& commandLineFlags) {
   });
   showLogoSplash(renderer, freeDataPath.file("images/succubi.png"), splashDone);
   loadThread.join();
+  splashCaption = nullptr;
+  if (integrityResult == 10 || integrityResult == 30)
+    std::cout << "[integrity] " << (integrityResult == 10 ? "repaired altered game files"
+                                                          : "some files could NOT be repaired") << std::endl;
+  // RAR data protection: hash our rule files AFTER any repair, so what we report at login is what we will
+  // actually load. Hashing before the check would report the tampered content we just fixed.
+  rarSetDataFreeHash(rarHashDataFree(freeDataPath.getPath()));
   map<TStringId, TString>* sentences = nullptr;
   optional<string> exportSentencesPath;
   if (commandLineFlags["export_translatable_sentences"].was_set()) {
