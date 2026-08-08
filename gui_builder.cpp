@@ -275,9 +275,39 @@ static optional<int> getNextActive(const vector<CollectiveInfo::Button>& buttons
   return i;
 }
 
-SGuiElem GuiBuilder::drawBuildings(const vector<CollectiveInfo::Button>& buttons, const optional<TutorialInfo>& tutorial) {
-  if (buttons.empty())
+// Two build-menu groups can PRINT the same name and still compare unequal: a mod may name its group with a
+// literal string while vanilla names its own through a TStringId, and TString equality is by value, not by
+// rendered text. The menu then shows the same heading two or three times ("Installations", "Installations",
+// ...) with the entries split between them.
+//
+// Canonicalise by TRANSLATED text: the first group with a given rendered name wins, and every later group
+// that renders identically is rewritten to use that same TString. Every existing comparison in the drawing
+// code (run detection here, the map key in drawBuildingsOverlay) then treats them as one group, with no other
+// change. Purely presentational - the underlying build entries and their order are untouched.
+//
+// NOTE: the row builder below walks CONSECUTIVE runs, so same-named groups merge visually only when they are
+// adjacent in the keeper's buildingGroups list. The overlay, which keys a map by name, merges them either way.
+static vector<CollectiveInfo::Button> mergeGroupsByRenderedName(GuiFactory& gui,
+    const vector<CollectiveInfo::Button>& buttons) {
+  vector<CollectiveInfo::Button> ret = buttons;
+  map<string, TString> canonical;
+  for (auto& b : ret) {
+    if (b.groupName.empty())
+      continue;
+    auto text = gui.translate(b.groupName);
+    auto it = canonical.find(text);
+    if (it == canonical.end())
+      canonical.emplace(std::move(text), b.groupName);
+    else
+      b.groupName = it->second;
+  }
+  return ret;
+}
+
+SGuiElem GuiBuilder::drawBuildings(const vector<CollectiveInfo::Button>& buttonsIn, const optional<TutorialInfo>& tutorial) {
+  if (buttonsIn.empty())
     return WL(empty);
+  const auto buttons = mergeGroupsByRenderedName(gui, buttonsIn);
   vector<SGuiElem> keypressOnly;
   auto elems = WL(getListBuilder, legendLineHeight);
   elems.addSpace(5);
@@ -3395,8 +3425,10 @@ SGuiElem GuiBuilder::drawItemsHelpOverlay(const vector<ItemInfo>& items) {
           WL(margins, std::move(leftSide), margin))));
 }
 
-SGuiElem GuiBuilder::drawBuildingsOverlay(const vector<CollectiveInfo::Button>& buildings,
+SGuiElem GuiBuilder::drawBuildingsOverlay(const vector<CollectiveInfo::Button>& buildingsIn,
     const optional<TutorialInfo>& tutorial) {
+  // Same merge as drawBuildings: groups that render to the same text share one overlay instead of several.
+  const auto buildings = mergeGroupsByRenderedName(gui, buildingsIn);
   vector<SGuiElem> elems;
   map<TString, GuiFactory::ListBuilder> overlaysMap;
   int margin = 20;

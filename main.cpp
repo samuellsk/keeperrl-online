@@ -75,7 +75,7 @@
 #include "rar_lockstep_net.h"
 #include "rar_client.h"
 #include "rar_mods.h"
-#include "rar_integrity.h"  // runs keeper_updater before any data_free file is read   // rarHashDataFree: our data_free fingerprint, reported at login
+#include "rar_integrity.h"  // runs keeper_updater before any data_free file is read
 
 #ifdef USE_STEAMWORKS
 #include "steam_base.h"
@@ -168,6 +168,7 @@ static po::parser getCommandLineFlags() {
   flags["rar_lockstep_gametest"].type(po::string).description("[pvp] RAR PvP: run the REAL sim through the netcode, arg 'save turns relayHost relayPort role outfile'; run twice (role 0/1) against a relay + diff");
   flags["rar_lockstep_battle"].type(po::string).description("[pvp] RAR PvP: play a live lockstep battle in a window, arg 'defenderSave invaderSave relayHost relayPort role' (role 0=defender, 1=invader)");
   flags["rar_siege_test"].description("[diag] RAR online: self-test the owner-returns-during-invasion (siege) flow, then exit");
+  flags["rar_publish_mods"].type(po::string).description("[server] Republish the mod manifest+bundles WITHOUT restarting a live server, arg '<modsDir> <outDir>'");
   flags["rar_gen_manifest"].type(po::string).description("[server] Write a release manifest for keeper_updater, arg '<installDir> <outFile> [protected]'");
   flags["rar_gen_worldmap"].type(po::string).description("[server] RAR online: which world-map layout --rar_gen_world builds (world_maps.txt id, or any random_layouts.txt name -- mods included)");
   flags["rar_gen_seed"].type(po::i32).description("[server] RAR online: terrain seed for --rar_gen_world (from --gen_preview) -> reproducible map");
@@ -495,6 +496,19 @@ static int keeperMain(po::parser& commandLineFlags) {
         &allUnlocked, nullptr, nullptr, 0, modVersion);
     loop.runRarServerFull(commandLineFlags["rar_server"].get().i32);
     exit(0);
+  }
+  if (commandLineFlags["rar_publish_mods"].was_set()) {
+    // Live mod update. The server reads rar_mods.txt and rar_mods/<mod>.dat FROM DISK on every request, so
+    // rewriting them is enough -- a running server picks the new set up immediately, with no restart and no
+    // dropped players. Content-free (rarPublishMods only bundles files), so this loads no game data.
+    auto toks = split(commandLineFlags["rar_publish_mods"].get().string, {' '});
+    if (toks.size() < 2) {
+      std::cout << "usage: --rar_publish_mods '<modsDir> <outDir>'\n";
+      exit(1);
+    }
+    int n = rarPublishMods(toks[0], toks[1]);
+    std::cout << "[publish] " << n << " mod(s) -> " << toks[1] << "/rar_mods.txt + rar_mods/\n";
+    exit(n > 0 ? 0 : 1);
   }
   if (commandLineFlags["rar_gen_manifest"].was_set()) {
     // Release step: fingerprint an install so keeper_updater can verify/repair it. Plain text, no game
