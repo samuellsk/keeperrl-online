@@ -1465,13 +1465,19 @@ MainLoop::ExitCondition MainLoop::playGame(PGame game, bool withMusic, bool noAu
         if (!wb->enemyId.empty())
           info.retiredEnemyInfo = SavedGameInfo::RetiredEnemyInfo{ EnemyId(wb->enemyId.c_str()), wb->type };
         string raw = serializeModelRaw(wb->model, info, game->getContentFactory());
-        // The model STAYS LOADED, conquered or not. Destroying it here was tried and reverted: the player's
-        // claims are not the only thing pointing into a site model -- the game's own villain lists hold raw
-        // Collective* into it, and freeing the model turned the position crash into a dangling-collective
-        // crash in the villains panel (refreshGameInfo -> isConquered) the moment a team left a site.
-        // takeVillainWriteback has already handed back the player's claims, which is what made the site
-        // dangerous; with those gone the model is merely resident, and resident is safe.
-        wb = none;                        // release our extra shared_ptr ref; models[pos] keeps it alive
+        // A CONQUERED site stays loaded -- PILLAGE is used from base and needs it (see above). A site that was
+        // only visited is released: it is a downloaded copy, keeping it bloats the save with every site ever
+        // entered, and on a shared map it would go stale the moment another player changed that villain.
+        //
+        // Release goes through Game::releaseSiteModel, the SAME teardown a rival-keeper invasion uses. Doing
+        // it by hand was tried and reverted: a site model is referenced by far more than the player's claims
+        // (the game's villain lists hold raw Collective* into it, messages hold Positions, creatures hold
+        // combat intent), and freeing it without unwinding all of that just moved the crash.
+        const bool release = !wb->conquered;
+        const Vec2 sitePos = wb->pos;
+        wb = none;                        // drop our extra shared_ptr ref first, so the release can free it
+        if (release)
+          game->releaseSiteModel(sitePos, false /*keep the villain on the world map*/);
         std::thread([key, raw = std::move(raw)]() {
           string blob = rarLzmaCompress(raw);
           if (!blob.empty())
@@ -6366,13 +6372,26 @@ void MainLoop::rarSaveCheck(const string& savePath) {
       for (auto& p : col->getStoragePositions(storageId))
         storagePos.push_back(p);
   reportSpread("resource storage", storagePos);
-  // Exercise the release itself on real data: strip every claim the keeper holds inside a downloaded site and
-  // re-measure. In the game this runs from initializeModels (gated on rarEnabled, which is off headlessly).
-  int released = 0;
-  for (auto model : game->getAllModels())
-    if (model != game->getMainModel().get())
-      released += col->forgetPositionsOn(model);
-  std::cout << "[savecheck] --- releasing site claims (" << released << " territory squares) ---\n";
+  // Simulate the team LEAVING every site it is no longer standing in: take the writeback exactly as the game
+  // loop does, release the model through the shared teardown, then exercise BOTH crashes this has produced --
+  // the build menu's resource count (dangling storage position) and the villains panel (dangling Collective*).
+  // Releasing by hand instead of through this path is what shipped broken twice.
+  while (auto wb = game->takeVillainWriteback()) {
+    const Vec2 sitePos = wb->pos;
+    const bool conq = wb->conquered;
+    std::cout << "[savecheck] writeback for site at " << sitePos << " conquered=" << (conq ? "yes" : "no")
+              << " -> " << (conq ? "kept loaded (pillage)" : "RELEASING") << "\n";
+    wb = none;
+    if (!conq) {
+      game->releaseSiteModel(sitePos, false);
+      // The interior is freed, but the villain must still be ON the world map -- otherwise releasing a site
+      // would quietly delete the faction from the campaign, which is far worse than the bloat this fixes.
+      auto villain = game->getCampaign().getSites()[sitePos].getVillain();
+      std::cout << "[savecheck] world map still shows a villain at " << sitePos << ": "
+                << (villain ? "YES" : "NO -- BUG, the site was deleted from the campaign") << "\n";
+    }
+  }
+  std::cout << "[savecheck] models after release = " << game->getAllModels().size() << "\n";
   reportSpread("territory AFTER", col->getTerritory().getAll());
   vector<Position> after;
   for (auto& resId : factory->resourceOrder)
@@ -6380,7 +6399,14 @@ void MainLoop::rarSaveCheck(const string& savePath) {
       for (auto& p : col->getStoragePositions(storageId))
         after.push_back(p);
   reportSpread("resource storage AFTER", after);
-  for (auto& id : costIds)
+  int villainsWalked = 0;                       // the v0.0.3 crash: refreshGameInfo -> isConquered
+  for (auto type : ENUM_ALL(VillainType))
+    for (auto v : game->getVillains(type)) {
+      (void) v->isConquered();
+      ++villainsWalked;
+    }
+  std::cout << "[savecheck] villains panel walked " << villainsWalked << " collectives OK\n";
+  for (auto& id : costIds)                      // the original crash: build menu resource count
     std::cout << "[savecheck]   numResource('" << id << "') after release = "
               << col->numResource(CollectiveResourceId(id.data())) << "\n";
   std::cout.flush();

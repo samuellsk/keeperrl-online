@@ -1176,16 +1176,33 @@ void Game::resyncModelLocalTime(Model* m) {
 }
 
 void Game::destroyInvasionSite(Vec2 pos) {
+  // A rival keeper's dungeon: the dweller was a RetiredInfo marker added by addInvasionSite, so it goes too.
+  releaseSiteModel(pos, true);
+}
+
+// The SAME teardown for a world villain or ally the player merely travelled to. Everything a downloaded model
+// is referenced by has to be unwound before it can be freed -- freeing one without this is what turned the
+// dangling-position crash into a dangling-Collective* crash in the villains panel. The only difference from a
+// rival-keeper invasion is the campaign dweller: a villain must STAY on the world map, so its site keeps its
+// dweller and only the loaded copy of its interior goes away.
+void Game::releaseSiteModel(Vec2 pos, bool removeDweller) {
+  if (pos == baseModel)
+    return;
   Model* m = models[pos].get();
   if (!m)
     return;
+  // Hand back anything the keeper claimed inside the site (a prebuilt floor with a claim effect grants
+  // territory just for standing on it) BEFORE the model goes, or those squares dangle exactly as before.
+  if (playerCollective)
+    playerCollective->forgetPositionsOn(m);
   for (Collective* col : m->getCollectives()) {
     collectives.removeElementMaybe(col);
     for (auto& e : villainsByType)
       e.second.removeElementMaybe(col);
   }
   localTime.erase(m->getGroundLevel()->getUniqueId());
-  campaign->removeDweller(pos);
+  if (removeDweller)
+    campaign->removeDweller(pos);
   // The invading team's minions recorded known tiles on the enemy level for their (surviving) keeper
   // collective. Those Positions hold a raw Level* that serializes via getThis(); once the model is
   // freed below they'd dangle and crash the save. Scrub every surviving collective's known tiles back
@@ -1224,6 +1241,10 @@ void Game::destroyInvasionSite(Vec2 pos) {
   // from scratch drops the stale entry cleanly.
   if (playerControl)
     playerControl->updateUnknownLocations();
+  // Re-arm: a later visit re-downloads this site (getting whatever aftermath was written back, including any
+  // damage another player did in the meantime) and leaving must release it again.
+  villainWrittenBack.erase(pos);
+  injectedVillainEnemyId.erase(pos);
 }
 
 Model* Game::addInvasionSite(Vec2 pos, PModel model, SavedGameInfo info) {
