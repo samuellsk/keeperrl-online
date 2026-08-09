@@ -47,6 +47,9 @@ class ConstructionMap {
   const PositionSet& getBuiltPositions(FurnitureType) const;
   void onConstructed(Position, FurnitureType);
   void clearUnsupportedFurniturePlans();
+  // RAR: drop every stored position matching `pred` (positions on a released site model). StorageId is a
+  // content id, so the ids can't be enumerated from outside -- the map has to clean itself.
+  void forgetStorage(function<bool(const Position&)> pred);
 
   const vector<pair<Position, FurnitureLayer>>& getAllFurniture() const;
   int getDebt(CollectiveResourceId) const;

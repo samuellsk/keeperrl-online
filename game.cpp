@@ -676,6 +676,33 @@ optional<ExitInfo> Game::updateInput() {
 static const TimeInterval initialModelUpdate = 2_visible;
 
 void Game::initializeModels(ProgressMeter& meter) {
+  // REPAIR, before anything reads a position. Saves written before sites were released on exit can hold
+  // player claims inside a downloaded site -- territory and even storage squares, granted by that site's own
+  // claim-effect floors. Those squares are not the player's to keep, and once the model is gone every one of
+  // them is a live crash: the build menu counts resources by reading items off storage squares, and a
+  // position whose level has died passes isValid() (it only checks a bool) and faults on dereference.
+  // Hand them all back here, once, for any site that is no longer loaded.
+  if (rarEnabled())
+    if (auto pc = getPlayerCollective()) {
+      int repaired = 0;
+      // (a) Claims inside a downloaded SITE. The player should never carry these across a load: the site is
+      // transient and may be released at any point, and every claim in it is then a live crash waiting for
+      // whichever system reads it first. Strip them whatever the model's fate, rather than depending on
+      // knowing exactly when it gets released.
+      for (Vec2 v : models.getBounds())
+        if (v != baseModel)
+          if (auto model = models[v].get())
+            repaired += pc->forgetPositionsOn(model);
+      // (b) Claims on a level that is already gone -- a save written before (a) existed.
+      set<const Level*> live;
+      for (Vec2 v : models.getBounds())
+        if (auto model = models[v].get())
+          for (auto level : model->getLevels())
+            live.insert(level);
+      repaired += pc->forgetPositionsNotOn(live);
+      if (repaired > 0)
+        INFO << "RAR: released " << repaired << " squares the keeper had claimed inside downloaded sites";
+    }
   for (auto col : getCollectives())
     col->update(col->getModel() == getCurrentModel());
   // Give every model a couple of turns so that things like shopkeepers can initialize.
@@ -1035,13 +1062,24 @@ optional<Game::VillainWriteback> Game::takeVillainWriteback() {
     Model* m = models[v].get();
     if (!m || m == base || villainWrittenBack.count(v))
       continue;
+    // A site the player VISITED and left has to be written back and released too, not just one they conquered.
+    // Requiring isConquered() here meant walking into a villain (or an ally, which is never conquered at all)
+    // and walking out left the downloaded model attached to the game forever -- along with any territory the
+    // site's own claim-effect floors handed to the visiting keeper. Take the conquered collective when there
+    // is one, so the aftermath is reported against the right faction; otherwise take the site's owner.
     Collective* villainCol = nullptr;
-    for (Collective* col : m->getCollectives()) {
+    for (Collective* col : m->getCollectives())
       if (isConquerableSite(col->getVillainType()) && col->isConquered()) {
         villainCol = col;
         break;
       }
-    }
+    const bool conquered = !!villainCol;
+    if (!villainCol)
+      for (Collective* col : m->getCollectives())
+        if (isConquerableSite(col->getVillainType())) {
+          villainCol = col;
+          break;
+        }
     if (!villainCol)
       continue;
     // Only capture once the invading team has LEFT (no player-collective creature remains on this model),
@@ -1054,9 +1092,27 @@ optional<Game::VillainWriteback> Game::takeVillainWriteback() {
       continue;
     villainWrittenBack.insert(v);
     string enemyId = injectedVillainEnemyId.count(v) ? injectedVillainEnemyId.at(v) : string();
-    return VillainWriteback{ v, models[v].giveMeSharedPointer(), enemyId, villainCol->getVillainType() };
+    // Hand back every claim the player picked up inside this site BEFORE anything can release the model. A
+    // site's prebuilt floors can carry a claim effect, so simply standing in one grants the visiting keeper
+    // real territory and even storage squares; leaving those attached to a transient model is what produced
+    // the dangling-position crash. Doing it here covers both flows, since both come through this function.
+    if (auto pc = getPlayerCollective())
+      if (int given = pc->forgetPositionsOn(m))
+        INFO << "RAR: released " << given << " claimed squares inside the site at " << v;
+    return VillainWriteback{ v, models[v].giveMeSharedPointer(), enemyId, villainCol->getVillainType(), conquered };
   }
   return none;
+}
+
+// Drop a downloaded site model once the team has left and its state has been written back. Re-arms the
+// writeback for that tile: if the player travels there again the site is downloaded fresh (from the aftermath
+// we just uploaded), and leaving again has to release it again. Never touches the base model.
+void Game::releaseSiteModel(Vec2 pos) {
+  if (pos == baseModel || !models[pos])
+    return;
+  models[pos].clear();
+  villainWrittenBack.erase(pos);
+  injectedVillainEnemyId.erase(pos);
 }
 
 void Game::rearmVillainWriteback(Vec2 villainPos) {

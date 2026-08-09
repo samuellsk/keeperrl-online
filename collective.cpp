@@ -966,6 +966,64 @@ void Collective::unclaimSquare(Position pos) {
       }
 }
 
+// RAR: a downloaded site (villain or ally) is a TRANSIENT model -- it is fetched when the team travels there
+// and released when they leave. But a prebuilt site whose floors carry a claim effect hands the visiting
+// keeper real territory inside it, and nothing ever gave that territory back. The collective then held
+// positions on a model that could go away, and the first thing to touch one died: Position::isValid() reports
+// a bool flag and never looks at the level pointer, so a dead position passes validation and faults on
+// dereference (seen as a crash in the build menu's resource count, on the first frame after loading).
+//
+// Strip EVERY position-keyed structure, not just territory: missing one only moves the crash to whichever
+// system touches it next. Kept as a single function so there is one place to get this right.
+int Collective::forgetPositionsOn(const Model* m) {
+  if (!m)
+    return 0;
+  return forgetPositions([m](const Position& pos) { return pos.getModel() == m; });
+}
+
+// Same strip, selected the other way round: give up everything that is NOT on one of the still-loaded levels.
+// Used once at load to repair a save written before sites were released on exit.
+int Collective::forgetPositionsNotOn(const set<const Level*>& live) {
+  return forgetPositions([&live](const Position& pos) { return !live.count(pos.getLevel()); });
+}
+
+int Collective::forgetPositions(function<bool(const Position&)> drop) {
+  int given = 0;
+  // 1. territory (+ the construction plans unclaimSquare takes with it)
+  vector<Position> toDrop;
+  for (auto& pos : territory->getAll())
+    if (drop(pos))
+      toDrop.push_back(pos);
+  for (auto& pos : toDrop) {
+    unclaimSquare(pos);
+    ++given;
+  }
+  // 2. storage squares -- what the build menu walks to count resources, i.e. the one that actually crashed
+  constructions->forgetStorage(drop);
+  // 3. zones (quarters included -- an unreachable quarter would keep a minion assigned to a dead square)
+  for (auto zone : ENUM_ALL(ZoneId)) {
+    vector<Position> zoned;
+    for (auto& pos : zones->getPositions(zone))
+      if (drop(pos))
+        zoned.push_back(pos);
+    for (auto& pos : zoned)
+      zones->eraseZone(pos, zone);
+  }
+  // 4. queued work on those squares
+  for (auto& pos : toDrop)
+    if (Task* task = taskMap->getMarked(pos))
+      taskMap->removeTask(task);
+  // 5. position matching and the delayed-square timers
+  for (auto& pos : toDrop) {
+    positionMatching->releaseTarget(pos);
+    delayedPos.erase(pos);
+  }
+  // 6. known tiles: there is already a helper for exactly this (added when a destroyed invaded dungeon left
+  // foreign tiles behind), so reuse it rather than reimplementing the filter.
+  limitKnownTilesToOwnModel();
+  return given;
+}
+
 void Collective::claimWallFurniture(Position pos) {
   addKnownTile(pos);
   for (auto layer : {FurnitureLayer::FLOOR, FurnitureLayer::MIDDLE, FurnitureLayer::CEILING})

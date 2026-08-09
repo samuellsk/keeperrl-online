@@ -112,6 +112,8 @@
 #include "game_info.h"
 #include "tribe_alignment.h"
 #include "unlocks.h"
+#include "storage_positions.h"
+#include "territory.h"
 #include "scripted_ui_data.h"
 #include "version.h"
 #include "rar_client.h"
@@ -1463,7 +1465,15 @@ MainLoop::ExitCondition MainLoop::playGame(PGame game, bool withMusic, bool noAu
         if (!wb->enemyId.empty())
           info.retiredEnemyInfo = SavedGameInfo::RetiredEnemyInfo{ EnemyId(wb->enemyId.c_str()), wb->type };
         string raw = serializeModelRaw(wb->model, info, game->getContentFactory());
-        wb = none;                        // release our extra shared_ptr ref; models[pos] keeps the model alive
+        // A CONQUERED site stays loaded (see above -- PILLAGE needs it). A site that was only visited is
+        // released here: it is a downloaded, transient map, and keeping it would grow the player's save with
+        // every site they ever walked into. takeVillainWriteback has already handed back any claims the
+        // player picked up inside it, so nothing references this model by the time it goes.
+        const bool release = !wb->conquered;
+        const Vec2 sitePos = wb->pos;
+        wb = none;                        // release our extra shared_ptr ref
+        if (release)
+          game->releaseSiteModel(sitePos);
         std::thread([key, raw = std::move(raw)]() {
           string blob = rarLzmaCompress(raw);
           if (!blob.empty())
@@ -2689,6 +2699,33 @@ void MainLoop::rarInvasionLoadTest(const string& gameId) {
   } else
     std::cout << "[inv] model load FAILED\n";
   std::cout.flush();
+}
+
+// Time the server calls the world map makes, so "opening the map freezes" can be split into network vs local
+// CPU before anything is optimised. Every rar_client call builds a FRESH curl handle, which means a TCP
+// connect + PSK knock + full TLS handshake per call -- there is no connection reuse -- so the per-call cost is
+// dominated by handshakes, not by the few KB of payload.
+void MainLoop::rarNetBench(int reps) {
+  if (reps <= 0)
+    reps = 5;
+  auto timeIt = [&] (const char* label, function<int()> call) {
+    double total = 0, worst = 0;
+    int bytes = 0;
+    for (int i = 0; i < reps; ++i) {
+      auto t0 = std::chrono::steady_clock::now();
+      bytes = call();
+      double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+      total += ms;
+      worst = max(worst, ms);
+    }
+    std::cout << "[net] " << label << ": avg " << (int) (total / reps) << " ms, worst " << (int) worst
+              << " ms, " << bytes << " bytes\n";
+    std::cout.flush();
+  };
+  std::cout << "[net] " << reps << " reps each, one fresh TLS connection per call\n";
+  timeIt("/ping         ", [] { return rarServerReachable() ? 1 : 0; });
+  timeIt("/claims       ", [] { return (int) rarGetClaims().size(); });
+  timeIt("/villain_roster", [] { return (int) rarGetVillainRoster().size(); });
 }
 
 // Rewrite every villain interior in rar_villains/ with THIS binary's serialization, keeping the roster exactly
@@ -6194,4 +6231,159 @@ void MainLoop::registerModPlaytime(bool started) {
       ugc.stopPlaytimeTracking({itemId});
   }
 #endif
+}
+
+// Diagnose the "crash on the first rendered frame" (--rar_save_check <save>). The build menu counts resources
+// by walking the collective's storage positions and reading items off each one; if a position still points at
+// a Level that no longer exists, that read is an access violation and the game dies before it draws anything.
+// Position::isValid() cannot catch it -- it only reports a bool flag and never looks at the level pointer.
+//
+// This checks the SAME positions the build menu would, but compares each level POINTER against the set of
+// levels the loaded game actually owns. Pointer comparison only: a dangling level is never dereferenced.
+void MainLoop::rarSaveCheck(const string& savePath) {
+  // Accept either a normal save OR a raw server transport blob (lzma). The server copy is what an invaded
+  // keeper actually loads on continue, so it has to be checkable too.
+  auto loaded = loadFromFile<PGame>(FilePath::fromFullPath(savePath));
+  if (!loaded || !*loaded) {
+    std::ifstream in(savePath, std::ios::binary);
+    string blob((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    string raw = rarLzmaDecompress(blob);
+    std::cout << "[savecheck] not a plain save; lzma=" << blob.size() << " -> raw=" << raw.size() << "\n";
+    if (!raw.empty()) {
+      FilePath t = userPath.file("rar_savecheck" + getSaveSuffix(GameSaveType::KEEPER));
+      { ogzstream out(t.getPath()); out.write(raw.data(), raw.size()); }
+      loaded = loadFromFile<PGame>(t);
+    }
+  }
+  if (!loaded || !*loaded) { std::cout << "[savecheck] could not load " << savePath << "\n"; return; }
+  PGame game = std::move(*loaded);
+  // Bring the game up exactly as the real load path does -- the crash happens on the first frame AFTER this,
+  // so anything initializeModels fixes up must be applied before we judge a position dangling.
+  Clock clock(true);
+  DummyView dummyView(&clock);
+  Encyclopedia encyclopedia(game->getContentFactory());
+  Unlocks allUnlocked = Unlocks::allUnlocked();
+  game->initialize(options, nullptr, &dummyView, nullptr, &encyclopedia, &allUnlocked, nullptr);
+  ProgressMeter meter(1);
+  game->initializeModels(meter);
+  std::set<const Level*> liveLevels;
+  for (auto model : game->getAllModels())
+    for (auto level : model->getLevels())
+      liveLevels.insert(level);
+  std::cout << "[savecheck] rarEnabled=" << (rarEnabled() ? "yes" : "NO (load-time site repair is gated on it)") << "\n";
+  std::cout << "[savecheck] models=" << game->getAllModels().size() << " levels=" << liveLevels.size() << "\n";
+  auto col = game->getPlayerCollective();
+  if (!col) { std::cout << "[savecheck] no player collective\n"; return; }
+  auto factory = game->getContentFactory();
+  // Check EVERY collective, not just the player's. Then do what fillButtons does -- call numResource for each
+  // build-menu cost id -- printing BEFORE each call, so if it dies the last line names the guilty resource.
+  int totalPos = 0, danglingPos = 0, colIdx = 0;
+  std::set<const Level*> danglingLevels;
+  for (auto model : game->getAllModels())
+    for (auto collective : model->getCollectives()) {
+      ++colIdx;
+      for (auto& resId : factory->resourceOrder) {
+        auto& info = collective->getResourceInfo(resId);
+        for (auto storageId : info.storage) {
+          int n = 0, bad = 0;
+          for (auto& pos : collective->getStoragePositions(storageId)) {
+            ++n;
+            ++totalPos;
+            if (!liveLevels.count(pos.getLevel())) {
+              ++bad;
+              ++danglingPos;
+              danglingLevels.insert(pos.getLevel());
+            }
+          }
+          if (bad > 0)
+            std::cout << "[savecheck] collective #" << colIdx << (collective == col ? " (PLAYER)" : "")
+                      << " resource '" << resId.data() << "': " << bad << "/" << n
+                      << " storage positions on a level this game does NOT own\n";
+        }
+      }
+    }
+  std::cout << "[savecheck] collectives=" << colIdx << " storage positions=" << totalPos
+            << " dangling=" << danglingPos << " across " << danglingLevels.size() << " missing level(s)\n";
+  std::cout.flush();
+  std::set<string> costIds;
+  for (auto& group : factory->buildInfo)          // map<groupName, vector<BuildInfo>>
+    for (auto& b : group.second)
+      b.type.visit<void>(
+          [&](const BuildInfoTypes::Furniture& elem) { if (elem.cost.value > 0) costIds.insert(elem.cost.id.data()); },
+          [&](const auto&) {});
+  std::cout << "[savecheck] build-menu cost resources: " << costIds.size() << "\n";
+  std::cout.flush();
+  for (auto& id : costIds) {
+    std::cout << "[savecheck]   numResource('" << id << "') ... ";
+    std::cout.flush();
+    std::cout << col->numResource(CollectiveResourceId(id.data())) << "\n";
+    std::cout.flush();
+  }
+  std::cout << "[savecheck] every build-menu resource count succeeded\n";
+  // The save holds more than one model, which for an online keeper means an invaded site is still attached.
+  // If anything unloads that model while the PLAYER's collective still holds positions on its levels, those
+  // positions dangle and the next build-menu refresh dereferences one. Report the split now, per model.
+  std::map<const Level*, int> levelOwner;   // level -> model index
+  int mi = 0;
+  for (auto model : game->getAllModels()) {
+    ++mi;
+    std::cout << "[savecheck] model #" << mi << " at world " << model->position << " levels="
+              << model->getLevels().size() << " creatures=" << model->getAllCreatures().size()
+              << (model == game->getMainModel().get() ? "  <- MAIN (the keeper's own)" : "  <- extra") << "\n";
+    for (auto level : model->getLevels())
+      levelOwner[level] = mi;
+  }
+  auto reportSpread = [&] (const char* what, const vector<Position>& positions) {
+    std::map<int, int> perModel;
+    for (auto& p : positions)
+      ++perModel[levelOwner.count(p.getLevel()) ? levelOwner[p.getLevel()] : -1];
+    std::cout << "[savecheck] player " << what << ":";
+    for (auto& e : perModel)
+      std::cout << (e.first < 0 ? "  UNKNOWN-MODEL=" : "  model#" + toString(e.first) + "=") << e.second;
+    std::cout << "\n";
+  };
+  // WHO owns what on the extra model. An ALLY site is visited, never conquered, so it never goes through the
+  // conquered-villain writeback -- worth knowing whether the player's collective really reaches into it, or
+  // whether these positions belong to the ally's own collective.
+  std::cout << "[savecheck] player collective: tribe=" << col->getTribeId().data()
+            << " villainType=" << EnumInfo<VillainType>::getString(col->getVillainType())
+            << " territory=" << col->getTerritory().getAll().size() << "\n";
+  mi = 0;
+  for (auto model : game->getAllModels()) {
+    ++mi;
+    for (auto collective : model->getCollectives()) {
+      auto& terr = collective->getTerritory().getAll();
+      if (terr.empty())
+        continue;
+      std::cout << "[savecheck]   model#" << mi << " collective tribe=" << collective->getTribeId().data()
+                << " type=" << EnumInfo<VillainType>::getString(collective->getVillainType())
+                << " territory=" << terr.size()
+                << (collective == col ? "   <<< THIS IS THE PLAYER'S OWN COLLECTIVE" : "") << "\n";
+    }
+  }
+  reportSpread("territory", col->getTerritory().getAll());
+  vector<Position> storagePos;
+  for (auto& resId : factory->resourceOrder)
+    for (auto storageId : col->getResourceInfo(resId).storage)
+      for (auto& p : col->getStoragePositions(storageId))
+        storagePos.push_back(p);
+  reportSpread("resource storage", storagePos);
+  // Exercise the release itself on real data: strip every claim the keeper holds inside a downloaded site and
+  // re-measure. In the game this runs from initializeModels (gated on rarEnabled, which is off headlessly).
+  int released = 0;
+  for (auto model : game->getAllModels())
+    if (model != game->getMainModel().get())
+      released += col->forgetPositionsOn(model);
+  std::cout << "[savecheck] --- releasing site claims (" << released << " territory squares) ---\n";
+  reportSpread("territory AFTER", col->getTerritory().getAll());
+  vector<Position> after;
+  for (auto& resId : factory->resourceOrder)
+    for (auto storageId : col->getResourceInfo(resId).storage)
+      for (auto& p : col->getStoragePositions(storageId))
+        after.push_back(p);
+  reportSpread("resource storage AFTER", after);
+  for (auto& id : costIds)
+    std::cout << "[savecheck]   numResource('" << id << "') after release = "
+              << col->numResource(CollectiveResourceId(id.data())) << "\n";
+  std::cout.flush();
 }

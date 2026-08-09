@@ -229,7 +229,9 @@ class Game : public OwnedObject<Game> {
   // state is stable), mark it captured so it isn't re-processed, and hand back its model for serialize+upload.
   // Returns none if the team is still inside or nothing is pending. The caller uploads the aftermath, then
   // calls destroyInvasionSite(pos) to fully drop the model. type/enemyId rebuild the retired-site header.
-  struct VillainWriteback { Vec2 pos; shared_ptr<Model> model; string enemyId; VillainType type; };
+  // `conquered` distinguishes the two flows: a conquered site keeps its model alive locally so PILLAGE can be
+  // used from base, while a site that was merely visited is released once its state has been written back.
+  struct VillainWriteback { Vec2 pos; shared_ptr<Model> model; string enemyId; VillainType type; bool conquered; };
   optional<VillainWriteback> takeVillainWriteback();
   // RAR: the villain at this world tile changed AFTER its aftermath was already captured -- the player pillaged
   // loot off it from base. Clear its "already written back" mark so takeVillainWriteback re-captures and
@@ -237,6 +239,8 @@ class Game : public OwnedObject<Game> {
   // (and every session) re-offers the same items -- and re-pillaging an item whose unique id is still in base
   // storage from a previous pillage crashes IndexedVector::insert. No-op offline (the set is empty).
   void rearmVillainWriteback(Vec2 villainPos);
+  // RAR: release a visited (non-conquered) site's downloaded model after its writeback. See game.cpp.
+  void releaseSiteModel(Vec2 pos);
   // RAR: label an injected villain with its enemyId, so a later writeback can rebuild the retired-site header.
   void recordInjectedVillain(Vec2 pos, const string& enemyId);
   // RAR: true while the player is mid-invasion -- an active keeper invasion OR controlling a team AWAY from

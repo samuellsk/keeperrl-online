@@ -123,6 +123,12 @@ class Collective : public TaskCallback, public UniqueEntity<Collective>, public 
   // must stay out of it -- this gives ownership (and therefore eyeball registration) and nothing else.
   void claimWallFurniture(Position);
   void unclaimSquare(Position);
+  // RAR: drop EVERY position-keyed reference this collective holds into `m`, so the model can be released
+  // without leaving dangling positions behind. Returns how many territory squares were given up.
+  int forgetPositionsOn(const Model* m);
+  // Same, selected by what is still loaded -- the one-time repair for saves written before sites were released.
+  int forgetPositionsNotOn(const set<const Level*>& live);
+  int forgetPositions(function<bool(const Position&)> drop); // shared worker for the two above
   const KnownTiles& getKnownTiles() const;
   void limitKnownTilesToOwnModel(); // RAR: drop known tiles on foreign models (e.g. a destroyed invaded dungeon)
   void retire();

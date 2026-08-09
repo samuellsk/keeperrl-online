@@ -176,6 +176,8 @@ static po::parser getCommandLineFlags() {
   flags["rar_world_selftest"].type(po::string).description("[diag] RAR online: deserialize a world file and print a summary, then exit");
   flags["rar_repair_villains"].type(po::string).description("[server] RAR online: regenerate any missing villain blobs for the given campaign file (in server/), then exit");
   flags["rar_regen_villains"].type(po::string).description("[server] RAR online: rewrite villain interiors in the CURRENT save format, roster/positions kept; arg 'placed', 'spares', 'all', or one tile 'x_y' / villain id");
+  flags["rar_net_bench"].type(po::i32).description("[diag] RAR online: time /ping, /claims and /villain_roster (N reps) to split world-map lag into network vs CPU, then exit");
+  flags["rar_save_check"].type(po::string).description("[diag] RAR: load a save and report collective storage positions whose Level no longer exists (the first-frame crash), then exit");
   flags["map_editor"].type(po::string).description("[layout] GRAPHICAL layout/world-map previewer: pick a layout, set size, reroll, read off the seed. Arg optional");
   flags["gen_preview"].type(po::string).description("[layout] Alias of --map_editor (older name)");
   flags["rar_mod_selftest"].type(po::string).description("[diag] RAR online: bundle+reinstall a mod dir and verify the hash round-trip, then exit");
@@ -558,6 +560,18 @@ static int keeperMain(po::parser& commandLineFlags) {
         &allUnlocked, nullptr, nullptr, 0, modVersion);
     loop.testServerWorld(commandLineFlags["rar_world_selftest"].get().string);
     exit(0);
+  }
+  if (commandLineFlags["rar_save_check"].was_set()) {
+    MainLoop loop(nullptr, nullptr, nullptr, paidDataPath, freeDataPath, userPath, modsDir, &options, nullptr, nullptr, nullptr,
+        &allUnlocked, nullptr, nullptr, saveVersion, modVersion);
+    loop.rarSaveCheck(commandLineFlags["rar_save_check"].get().string);
+    return 0;
+  }
+  if (commandLineFlags["rar_net_bench"].was_set()) {
+    MainLoop loop(nullptr, nullptr, nullptr, paidDataPath, freeDataPath, userPath, modsDir, &options, nullptr, nullptr, nullptr,
+        &allUnlocked, nullptr, nullptr, saveVersion, modVersion);
+    loop.rarNetBench(commandLineFlags["rar_net_bench"].get().i32);
+    return 0;
   }
   if (commandLineFlags["rar_regen_villains"].was_set()) {
     // Same directory dance as gen/repair: content via ABSOLUTE paths, then work inside server/ where

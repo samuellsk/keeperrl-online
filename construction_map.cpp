@@ -190,6 +190,17 @@ const StoragePositions& ConstructionMap::getAllStoragePositions() const {
   return allStoragePositions;
 }
 
+void ConstructionMap::forgetStorage(function<bool(const Position&)> pred) {
+  auto strip = [&pred](StoragePositions& positions) {
+    for (auto& pos : positions.asVector())     // asVector: a copy, so removing while iterating is safe
+      if (pred(pos))
+        positions.remove(pos);
+  };
+  for (auto& elem : storagePositions)
+    strip(elem.second);
+  strip(allStoragePositions);
+}
+
 void ConstructionMap::checkDebtConsistency() {
   HashMap<CollectiveResourceId, int> nowDebt;
   for (auto& f : allFurniture) {
