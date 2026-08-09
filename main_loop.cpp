@@ -1465,15 +1465,13 @@ MainLoop::ExitCondition MainLoop::playGame(PGame game, bool withMusic, bool noAu
         if (!wb->enemyId.empty())
           info.retiredEnemyInfo = SavedGameInfo::RetiredEnemyInfo{ EnemyId(wb->enemyId.c_str()), wb->type };
         string raw = serializeModelRaw(wb->model, info, game->getContentFactory());
-        // A CONQUERED site stays loaded (see above -- PILLAGE needs it). A site that was only visited is
-        // released here: it is a downloaded, transient map, and keeping it would grow the player's save with
-        // every site they ever walked into. takeVillainWriteback has already handed back any claims the
-        // player picked up inside it, so nothing references this model by the time it goes.
-        const bool release = !wb->conquered;
-        const Vec2 sitePos = wb->pos;
-        wb = none;                        // release our extra shared_ptr ref
-        if (release)
-          game->releaseSiteModel(sitePos);
+        // The model STAYS LOADED, conquered or not. Destroying it here was tried and reverted: the player's
+        // claims are not the only thing pointing into a site model -- the game's own villain lists hold raw
+        // Collective* into it, and freeing the model turned the position crash into a dangling-collective
+        // crash in the villains panel (refreshGameInfo -> isConquered) the moment a team left a site.
+        // takeVillainWriteback has already handed back the player's claims, which is what made the site
+        // dangerous; with those gone the model is merely resident, and resident is safe.
+        wb = none;                        // release our extra shared_ptr ref; models[pos] keeps it alive
         std::thread([key, raw = std::move(raw)]() {
           string blob = rarLzmaCompress(raw);
           if (!blob.empty())

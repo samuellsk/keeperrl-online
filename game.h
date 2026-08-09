@@ -239,8 +239,6 @@ class Game : public OwnedObject<Game> {
   // (and every session) re-offers the same items -- and re-pillaging an item whose unique id is still in base
   // storage from a previous pillage crashes IndexedVector::insert. No-op offline (the set is empty).
   void rearmVillainWriteback(Vec2 villainPos);
-  // RAR: release a visited (non-conquered) site's downloaded model after its writeback. See game.cpp.
-  void releaseSiteModel(Vec2 pos);
   // RAR: label an injected villain with its enemyId, so a later writeback can rebuild the retired-site header.
   void recordInjectedVillain(Vec2 pos, const string& enemyId);
   // RAR: true while the player is mid-invasion -- an active keeper invasion OR controlling a team AWAY from

@@ -682,7 +682,10 @@ void Game::initializeModels(ProgressMeter& meter) {
   // them is a live crash: the build menu counts resources by reading items off storage squares, and a
   // position whose level has died passes isValid() (it only checks a bool) and faults on dereference.
   // Hand them all back here, once, for any site that is no longer loaded.
-  if (rarEnabled())
+  // NOT gated on rarEnabled(): a keeper holding squares inside a model that isn't its own is dangerous in any
+  // mode, and outside RAR it simply never happens, so the strip is a no-op there. Gating it also made the
+  // repair impossible to exercise from a save file, which is how it shipped once without being verified.
+  {
     if (auto pc = getPlayerCollective()) {
       int repaired = 0;
       // (a) Claims inside a downloaded SITE. The player should never carry these across a load: the site is
@@ -703,6 +706,7 @@ void Game::initializeModels(ProgressMeter& meter) {
       if (repaired > 0)
         INFO << "RAR: released " << repaired << " squares the keeper had claimed inside downloaded sites";
     }
+  }
   for (auto col : getCollectives())
     col->update(col->getModel() == getCurrentModel());
   // Give every model a couple of turns so that things like shopkeepers can initialize.
@@ -1102,17 +1106,6 @@ optional<Game::VillainWriteback> Game::takeVillainWriteback() {
     return VillainWriteback{ v, models[v].giveMeSharedPointer(), enemyId, villainCol->getVillainType(), conquered };
   }
   return none;
-}
-
-// Drop a downloaded site model once the team has left and its state has been written back. Re-arms the
-// writeback for that tile: if the player travels there again the site is downloaded fresh (from the aftermath
-// we just uploaded), and leaving again has to release it again. Never touches the base model.
-void Game::releaseSiteModel(Vec2 pos) {
-  if (pos == baseModel || !models[pos])
-    return;
-  models[pos].clear();
-  villainWrittenBack.erase(pos);
-  injectedVillainEnemyId.erase(pos);
 }
 
 void Game::rearmVillainWriteback(Vec2 villainPos) {
