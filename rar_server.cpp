@@ -1468,8 +1468,8 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
               "SESSION_TTL=%lds RESERVE_TTL=%lds SIEGE_PROTECT_TTL=%lds VILLAIN_LOCK_TTL=%lds POOL_REPLENISH_SECS=%ds ALL_DEVELOPERS=%d\n",
               SERVER_CONFIG_FILE,
               port, (long long) PROTECTION_TURNS, (long) CONQUERED_TTL, (long) VILLAIN_DEFEAT_TTL,
-              (long) SESSION_TTL, (long) RESERVE_TTL, (long) SIEGE_PROTECT_TTL, POOL_REPLENISH_SECS,
-              ALL_DEVELOPERS);
+              (long) SESSION_TTL, (long) RESERVE_TTL, (long) SIEGE_PROTECT_TTL, (long) VILLAIN_LOCK_TTL,
+              POOL_REPLENISH_SECS, ALL_DEVELOPERS);
   std::fflush(stdout);
   if (!g_villainCombos.empty()) {
     std::map<std::string, int> perTier;
