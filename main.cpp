@@ -177,6 +177,7 @@ static po::parser getCommandLineFlags() {
   flags["rar_repair_villains"].type(po::string).description("[server] RAR online: regenerate any missing villain blobs for the given campaign file (in server/), then exit");
   flags["rar_regen_villains"].type(po::string).description("[server] RAR online: rewrite villain interiors in the CURRENT save format, roster/positions kept; arg 'placed', 'spares', 'all', or one tile 'x_y' / villain id");
   flags["rar_net_bench"].type(po::i32).description("[diag] RAR online: time /ping, /claims and /villain_roster (N reps) to split world-map lag into network vs CPU, then exit");
+  flags["rar_probe_tile"].type(po::string).description("[diag] with --rar_net_bench: enter this site (\"x_y\") as a fake second keeper and show whether the pillage holder moves");
   flags["rar_save_check"].type(po::string).description("[diag] RAR: load a save and report collective storage positions whose Level no longer exists (the first-frame crash), then exit");
   flags["map_editor"].type(po::string).description("[layout] GRAPHICAL layout/world-map previewer: pick a layout, set size, reroll, read off the seed. Arg optional");
   flags["gen_preview"].type(po::string).description("[layout] Alias of --map_editor (older name)");
@@ -570,7 +571,8 @@ static int keeperMain(po::parser& commandLineFlags) {
   if (commandLineFlags["rar_net_bench"].was_set()) {
     MainLoop loop(nullptr, nullptr, nullptr, paidDataPath, freeDataPath, userPath, modsDir, &options, nullptr, nullptr, nullptr,
         &allUnlocked, nullptr, nullptr, saveVersion, modVersion);
-    loop.rarNetBench(commandLineFlags["rar_net_bench"].get().i32);
+    loop.rarNetBench(commandLineFlags["rar_net_bench"].get().i32,
+        commandLineFlags["rar_probe_tile"].was_set() ? commandLineFlags["rar_probe_tile"].get().string : string());
     return 0;
   }
   if (commandLineFlags["rar_regen_villains"].was_set()) {

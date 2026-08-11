@@ -167,6 +167,7 @@ std::time_t EVICTED_TTL = 3600;
 // rar_server_config.txt (or delete the line) to go back to per-account roles -- the roles themselves are kept,
 // this only overrides the answer.
 int ALL_DEVELOPERS = 1;
+std::time_t VILLAIN_LOCK_TTL = 300;   // 5 min: one keeper at a time per villain, incl. just after leaving
 std::time_t RESERVE_TTL = 1200;                    // 20 min; refreshed on hold, cleared on release
 // SIEGE: the owner of an offline dungeon came back while an invader is inside. The invader gets a short grace
 // to retreat, then his client force-exits control (which walks his team home = invasion over). Both sides poll
@@ -251,9 +252,21 @@ struct Villain {
   std::string pos;       // "x_y" while placed on the map; empty => unplaced spare
   bool alive = true;
   std::time_t defeatTime = 0; // set on defeat; drives the lootable grace before removal
+  // RAR pillage: bumped every time the interior or its loot manifest is rewritten. A client sends the version
+  // it based its change on; a mismatch means somebody got there first, so its upload is refused and it is told
+  // to refresh. This is the ENTIRE concurrency mechanism -- the server never loads a model to arbitrate.
+  long long version = 0;
 };
 std::map<std::string, Villain> g_villains;        // villainId -> villain. The FOLDER is the source of truth.
 std::map<std::string, std::string> g_villainAt;   // index: "x_y" -> villainId (placed villains only)
+// RAR: which keeper currently HOLDS a villain ("x_y" -> login, when). Taken when a client downloads the
+// interior (it is about to invade) and REFRESHED when it writes back on the way out, so the holder keeps it
+// for VILLAIN_LOCK_TTL after leaving. Nobody else can invade or pillage it in that window -- otherwise a
+// second keeper could walk in the moment the first steps out and take what they just fought for, and two
+// clients editing one interior is a split-brain the version check cannot repair.
+// Expires on its own, so a client that crashed inside never locks a villain permanently.
+std::map<std::string, std::pair<std::string, std::time_t>> g_villainCheckout;
+void releaseVillainHolds(const std::string& login);   // defined with the villain code below
 std::map<std::string, std::string> g_villainSlots;// rar_villain_slots.txt: candidate EMPTY land tiles "x_y" -> biome
 std::map<std::string, int> g_villainMinAlive;     // rar_villain_config.txt: tier -> min alive before respawn
 std::map<std::string, int> g_villainPoolTarget;   // rar_villain_config.txt POOL_<tier>: UNUSED spares to keep PER villain type
@@ -590,6 +603,7 @@ bool sessionHeldByOther(const std::string& login, const std::string& token) {
   if (it == g_sessions.end())
     return false;
   if (std::time(nullptr) - it->second.lastActivity > SESSION_TTL) {
+    releaseVillainHolds(login);  // a crashed client must not hold a villain forever
     g_sessions.erase(it); // stale: no activity within 5 min -> clear + allow
     return false;
   }
@@ -704,8 +718,27 @@ void purgeConqueredKeepers() {
   }
 }
 
+// The pillage right is SESSION-scoped on purpose: it must never outlive the player being logged in, and it
+// must never be written to a save. Dropping a login's holds here covers both the graceful logout and the
+// crash (whose session expires on its own), with no file to clean up afterwards.
+void releaseVillainHolds(const std::string& login) {   // call under g_mutex
+  for (auto it = g_villainCheckout.begin(); it != g_villainCheckout.end();)
+    if (it->second.first == login)
+      it = g_villainCheckout.erase(it);
+    else
+      ++it;
+}
+
 // ---- Phase B: villains (all call under g_mutex except the loaders at startup) ----
 std::string villainFile(const std::string& id) { return "rar_villains/" + id + ".dat"; }
+// The interior's LOOT MANIFEST: a few hundred bytes listing what a pillage would hand over, so a client can
+// answer "is there anything here worth the trip" without downloading a 200KB interior. Written by whoever
+// leaves the site, always in the same upload as the interior so the two can never describe different states.
+std::string villainLootFile(const std::string& id) { return "rar_villains/" + id + ".loot"; }
+// The loot STORE: the items themselves, serialized, with the position each came from. Small (measured 2.5KB
+// for 8 items, 31KB for 78) so a client can be handed loot without ever downloading the interior, and a
+// revisiting one can have the remainder put back where it was.
+std::string villainLootDataFile(const std::string& id) { return "rar_villains/" + id + ".lootdata"; }
 bool villainFileExists(const std::string& id) {
   if (id.empty() || id.find("..") != std::string::npos || id.find('/') != std::string::npos)
     return false;
@@ -738,6 +771,7 @@ void loadVillains() {
     v.tier = p[1]; v.enemyId = p[2]; v.biome = p[3];
     v.pos = (p.size() > 4) ? p[4] : std::string();
     v.alive = (p.size() > 5) ? (p[5] == "1") : true;
+    try { v.version = (p.size() > 7) ? std::stoll(p[7]) : 0; } catch (...) { v.version = 0; }
     try { v.defeatTime = (p.size() > 6) ? (std::time_t) std::stoll(p[6]) : 0; } catch (...) { v.defeatTime = 0; }
     if (!villainFileExists(p[0])) {
       std::printf("[villain] dropping '%s' (%s %s) -- no file in rar_villains/\n",
@@ -754,7 +788,8 @@ void saveVillains() { // call under g_mutex
   std::ofstream out("rar_villains.txt", std::ios::trunc);
   for (auto& e : g_villains)
     out << e.first << "\t" << e.second.tier << "\t" << e.second.enemyId << "\t" << e.second.biome << "\t"
-        << e.second.pos << "\t" << (e.second.alive ? 1 : 0) << "\t" << (long long) e.second.defeatTime << "\n";
+        << e.second.pos << "\t" << (e.second.alive ? 1 : 0) << "\t" << (long long) e.second.defeatTime
+        << "\t" << e.second.version << "\n";
 }
 void loadVillainSlots() { // candidate empty land tiles + their biome
   g_villainSlots.clear();
@@ -784,6 +819,7 @@ void loadServerConfig() {
       else if (p[0] == "VILLAIN_DEFEAT_TTL") VILLAIN_DEFEAT_TTL = (std::time_t) std::stoll(p[1]);
       else if (p[0] == "SESSION_TTL")        SESSION_TTL = (std::time_t) std::stoll(p[1]);
       else if (p[0] == "RESERVE_TTL")        RESERVE_TTL = (std::time_t) std::stoll(p[1]);
+      else if (p[0] == "VILLAIN_LOCK_TTL")   VILLAIN_LOCK_TTL = (std::time_t) std::stoll(p[1]);
       else if (p[0] == "OWNER_RETURN_GRACE") OWNER_RETURN_GRACE = (std::time_t) std::stoll(p[1]);
       else if (p[0] == "SIEGE_PROTECT_TTL")  SIEGE_PROTECT_TTL = (std::time_t) std::stoll(p[1]);
       else if (p[0] == "POOL_REPLENISH_SECS") POOL_REPLENISH_SECS = std::stoi(p[1]);
@@ -1429,7 +1465,7 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
   // SIEGE_PROTECT_TTL was readable from the config but missing here, so the one timer you could not verify
   // from the banner was the one governing re-invasion. All tunables that can be overridden are printed.
   std::printf("RAR server: tunables (%s) -- SERVER_PORT=%d PROTECTION_TURNS=%lld CONQUERED_TTL=%lds VILLAIN_DEFEAT_TTL=%lds "
-              "SESSION_TTL=%lds RESERVE_TTL=%lds SIEGE_PROTECT_TTL=%lds POOL_REPLENISH_SECS=%ds ALL_DEVELOPERS=%d\n",
+              "SESSION_TTL=%lds RESERVE_TTL=%lds SIEGE_PROTECT_TTL=%lds VILLAIN_LOCK_TTL=%lds POOL_REPLENISH_SECS=%ds ALL_DEVELOPERS=%d\n",
               SERVER_CONFIG_FILE,
               port, (long long) PROTECTION_TURNS, (long) CONQUERED_TTL, (long) VILLAIN_DEFEAT_TTL,
               (long) SESSION_TTL, (long) RESERVE_TTL, (long) SIEGE_PROTECT_TTL, POOL_REPLENISH_SECS,
@@ -1638,6 +1674,7 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
 
   // Explicit logout (graceful app exit): release the session immediately so the account can log in again
   // right away on this or another computer. Only the owner (matching token) may release.
+  // Also drops any villain the account was holding -- the pillage right does not survive logging out.
   svr.Post("/logout", [](const httplib::Request& req, httplib::Response& res) {
     auto p = splitLines(req.body); // login\npassword\nsessionToken
     if (p.size() < 2) { res.status = 400; res.set_content("bad request", "text/plain"); return; }
@@ -2182,6 +2219,22 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
     std::ifstream in(villainFile(id), std::ios::binary);
     if (!in) { res.status = 404; res.set_content("no villain", "text/plain"); return; }
     std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    // Downloading the interior IS the invasion. One keeper at a time: if somebody else holds this villain
+    // and their window has not run out, refuse -- and say why, so the player is told "another keeper is in
+    // there" instead of the generic "couldn't be loaded".
+    { std::lock_guard<std::mutex> lk(g_mutex);
+      const std::string who = req.get_param_value("login");
+      auto held = g_villainCheckout.find(key);
+      if (held != g_villainCheckout.end() && held->second.first != who &&
+          std::time(nullptr) - held->second.second < VILLAIN_LOCK_TTL) {
+        res.status = 423;
+        // Second line matters: by the time this is shown the team has already marched up to the site, so the
+        // player needs to be told what happens next, not just why they were stopped.
+        res.set_content("This villain is currently being invaded by another keeper.\n"
+            "We need to retreat for the time being.", "text/plain");
+        return;
+      }
+      g_villainCheckout[key] = { who, std::time(nullptr) }; }
     res.set_content(bytes, "application/octet-stream");
   });
 
@@ -2207,37 +2260,222 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
     res.set_content("ok", "text/plain");
   });
 
-  // Upload the post-battle "aftermath" of a defeated villain (dead defenders, dropped loot, damage) so the
-  // grace-period revisit shows the real outcome. body: login\npassword\nx_y\n<blob>. Only overwrites a
-  // villain that is currently defeated-in-grace; also (re)starts the grace clock if it wasn't set.
-  svr.Post("/villain_writeback", [](const httplib::Request& req, httplib::Response& res) {
+  // Which tiles still hold loot, in ONE request: "x_y<TAB>version<TAB>manifestBytes" per line. The villains
+  // panel needs this for every site at once, every refresh -- a per-tile fetch would be ~48 round trips a
+  // frame. Reads only file sizes, never a manifest body and never a model.
+  svr.Get("/villain_loot_index", [](const httplib::Request&, httplib::Response& res) {
+    std::string out;
+    std::lock_guard<std::mutex> lk(g_mutex);
+    for (auto& e : g_villains) {
+      if (e.second.pos.empty())
+        continue;
+      std::ifstream in(villainLootFile(e.first), std::ios::binary | std::ios::ate);
+      if (!in)
+        continue;
+      auto bytes = (long long) in.tellg();
+      if (bytes <= 0)
+        continue;
+      // 4th field: who currently holds the pillage right here. The right belongs to whoever was inside last,
+      // so a client that finds a site it thought was its own now owned by somebody else knows it was taken
+      // over -- that is the only signal it needs.
+      std::string owner;
+      { auto held = g_villainCheckout.find(e.second.pos);
+        if (held != g_villainCheckout.end())
+          owner = held->second.first; }
+      out += e.second.pos + "\t" + std::to_string(e.second.version) + "\t" + std::to_string(bytes)
+          + "\t" + owner + "\n";
+    }
+    res.set_content(out, "text/plain");
+  });
+
+  // The loot STORE itself: "<version>" newline then the serialized items. Small enough (2.5-31KB measured)
+  // to hand over whole, which is the entire point -- a pillaging client gets the loot without ever touching
+  // the 12MB interior, and so never re-serializes a model that has already been round-tripped.
+  svr.Get(R"(/villain_loot_data/(.+))", [](const httplib::Request& req, httplib::Response& res) {
+    std::string key = req.matches[1];
+    if (key.find("..") != std::string::npos || key.find('/') != std::string::npos) {
+      res.status = 400; res.set_content("bad key", "text/plain"); return;
+    }
+    std::string id;
+    long long version = 0;
+    { std::lock_guard<std::mutex> lk(g_mutex);
+      auto at = g_villainAt.find(key);
+      if (at != g_villainAt.end()) {
+        id = at->second;
+        auto it = g_villains.find(id);
+        if (it != g_villains.end()) version = it->second.version;
+      } }
+    if (id.empty()) { res.status = 404; res.set_content("no villain", "text/plain"); return; }
+    std::ifstream in(villainLootDataFile(id), std::ios::binary);
+    std::string data;
+    if (in) data.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    res.set_content(std::to_string(version) + "\n" + data, "application/octet-stream");
+  });
+
+  // Replace the store after a pillage. body: login/password/key/baseVersion (newline separated) then the
+  // remaining items. The interior is NOT touched -- that is what makes a pillage cheap and safe.
+  // The manifest is rebuilt by the client on its next departure; until then the index reports what is left
+  // by size, which is enough for "is there anything here".
+  svr.Post("/villain_loot_take", [](const httplib::Request& req, httplib::Response& res) {
     const std::string& b = req.body;
-    size_t n1 = b.find('\n');
-    size_t n2 = (n1 == std::string::npos) ? n1 : b.find('\n', n1 + 1);
-    size_t n3 = (n2 == std::string::npos) ? n2 : b.find('\n', n2 + 1);
-    if (n3 == std::string::npos) { res.status = 400; res.set_content("bad request", "text/plain"); return; }
-    std::string login = b.substr(0, n1);
-    std::string pw = b.substr(n1 + 1, n2 - n1 - 1);
-    std::string key = b.substr(n2 + 1, n3 - n2 - 1);
-    std::string blob = b.substr(n3 + 1);
+    size_t p[4];
+    size_t at = 0;
+    for (int i = 0; i < 4; ++i) {
+      p[i] = b.find('\n', at);
+      if (p[i] == std::string::npos) { res.status = 400; res.set_content("bad request", "text/plain"); return; }
+      at = p[i] + 1;
+    }
+    std::string login = b.substr(0, p[0]);
+    std::string pw = b.substr(p[0] + 1, p[1] - p[0] - 1);
+    std::string key = b.substr(p[1] + 1, p[2] - p[1] - 1);
+    long long baseVersion = -1;
+    try { baseVersion = std::stoll(b.substr(p[2] + 1, p[3] - p[2] - 1)); }
+    catch (...) { res.status = 400; res.set_content("bad header", "text/plain"); return; }
+    std::string remaining = b.substr(p[3] + 1);
     std::lock_guard<std::mutex> lk(g_mutex);
     if (!authOk(login, pw)) { res.status = 401; res.set_content("auth fail", "text/plain"); return; }
     if (key.empty() || key.find("..") != std::string::npos || key.find('/') != std::string::npos) {
       res.status = 400; res.set_content("bad key", "text/plain"); return;
     }
-    auto at = g_villainAt.find(key); // aftermath is posted for a TILE -> resolve to the villain there
-    auto it = (at == g_villainAt.end()) ? g_villains.end() : g_villains.find(at->second);
-    if (it == g_villains.end() || it->second.alive) { // only defeated-in-grace villains accept an aftermath
-      res.status = 409; res.set_content("not defeated", "text/plain"); return;
+    auto atIt = g_villainAt.find(key);
+    auto it = (atIt == g_villainAt.end()) ? g_villains.end() : g_villains.find(atIt->second);
+    if (it == g_villains.end()) { res.status = 404; res.set_content("no villain", "text/plain"); return; }
+    // Somebody physically inside the site beats a remote pillager -- they can pick the same items up by hand.
+    auto co = g_villainCheckout.find(key);
+    if (co != g_villainCheckout.end() && co->second.first != login &&
+        std::time(nullptr) - co->second.second < VILLAIN_LOCK_TTL) {
+      res.status = 423; res.set_content("another keeper is there", "text/plain"); return;
+    }
+    if (baseVersion >= 0 && baseVersion != it->second.version) {
+      res.status = 409; res.set_content(std::to_string(it->second.version), "text/plain"); return;
+    }
+    { std::ofstream out(villainLootDataFile(it->first), std::ios::binary);
+      out.write(remaining.data(), remaining.size()); }
+    ++it->second.version;
+    saveVillainState();
+    std::printf("[villain] '%s' pillaged %s -> %zu b of loot left, version %lld\n", login.c_str(),
+        key.c_str(), remaining.size(), it->second.version); std::fflush(stdout);
+    res.set_content(std::to_string(it->second.version), "text/plain");
+  });
+
+  // Cheap loot read: the version, a newline, then the manifest. A few hundred bytes and no model is ever
+  // loaded, so a client can list what a site still holds without pulling its 200KB interior. The version
+  // returned here is what a later upload must be based on.
+  svr.Get(R"(/villain_loot/(.+))", [](const httplib::Request& req, httplib::Response& res) {
+    std::string key = req.matches[1];
+    if (key.find("..") != std::string::npos || key.find('/') != std::string::npos) {
+      res.status = 400; res.set_content("bad key", "text/plain"); return;
+    }
+    std::string id;
+    long long version = 0;
+    { std::lock_guard<std::mutex> lk(g_mutex);
+      auto at = g_villainAt.find(key);
+      if (at != g_villainAt.end()) {
+        id = at->second;
+        auto it = g_villains.find(id);
+        if (it != g_villains.end()) version = it->second.version;
+      } }
+    if (id.empty()) { res.status = 404; res.set_content("no villain", "text/plain"); return; }
+    std::ifstream in(villainLootFile(id), std::ios::binary);
+    std::string manifest;
+    if (in) manifest.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    res.set_content(std::to_string(version) + "\n" + manifest, "text/plain");
+  });
+
+  // Aftermath upload. Body is six newline-separated header fields followed by the two payloads:
+  //   login / password / key / baseVersion / manifestBytes / then <manifest> immediately followed by <interior>
+  //
+  // The interior and its manifest arrive TOGETHER and are written together, so they can never describe
+  // different states -- the drift that a split into two independently-written files would have introduced.
+  //
+  // baseVersion is optimistic concurrency: -1 means "don't care" (the old unconditional behaviour, still used
+  // by the plain leave-a-site writeback); anything else must equal the stored version or the upload is refused
+  // with 409 and the current version, and the client refreshes. That is what makes two players pillaging the
+  // same site safe without holding a lock across a half-second compression.
+  svr.Post("/villain_writeback", [](const httplib::Request& req, httplib::Response& res) {
+    const std::string& b = req.body;
+    size_t p[6];
+    size_t at = 0;
+    for (int i = 0; i < 6; ++i) {
+      p[i] = b.find('\n', at);
+      if (p[i] == std::string::npos) { res.status = 400; res.set_content("bad request", "text/plain"); return; }
+      at = p[i] + 1;
+    }
+    std::string login = b.substr(0, p[0]);
+    std::string pw = b.substr(p[0] + 1, p[1] - p[0] - 1);
+    std::string key = b.substr(p[1] + 1, p[2] - p[1] - 1);
+    long long baseVersion = -1;
+    size_t manifestBytes = 0, lootBytes = 0;
+    try {
+      baseVersion = std::stoll(b.substr(p[2] + 1, p[3] - p[2] - 1));
+      manifestBytes = (size_t) std::stoull(b.substr(p[3] + 1, p[4] - p[3] - 1));
+      lootBytes = (size_t) std::stoull(b.substr(p[4] + 1, p[5] - p[4] - 1));
+    } catch (...) { res.status = 400; res.set_content("bad header", "text/plain"); return; }
+    if (p[5] + 1 + manifestBytes + lootBytes > b.size()) {
+      res.status = 400; res.set_content("truncated", "text/plain"); return;
+    }
+    std::string manifest = b.substr(p[5] + 1, manifestBytes);
+    std::string lootStore = b.substr(p[5] + 1 + manifestBytes, lootBytes);
+    std::string blob = b.substr(p[5] + 1 + manifestBytes + lootBytes);
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (!authOk(login, pw)) { res.status = 401; res.set_content("auth fail", "text/plain"); return; }
+    if (key.empty() || key.find("..") != std::string::npos || key.find('/') != std::string::npos) {
+      res.status = 400; res.set_content("bad key", "text/plain"); return;
+    }
+    auto atIt = g_villainAt.find(key);
+    auto it = (atIt == g_villainAt.end()) ? g_villains.end() : g_villains.find(atIt->second);
+    if (it == g_villains.end()) { res.status = 404; res.set_content("no villain", "text/plain"); return; }
+    // Deliberately NOT requiring the villain to be dead any more. A player who invades a multi-faction site,
+    // clears one sub-faction and walks out has genuinely changed that interior; refusing the upload threw
+    // that away and left everyone else looking at a site that still had the loot they had already taken.
+    // A CONDITIONAL upload (baseVersion >= 0) is a remote pillage. Refuse it while another player has the
+    // interior checked out: they are inside, and their unconditional leave-writeback would overwrite us.
+    auto co = g_villainCheckout.find(key);
+    if (baseVersion >= 0 && co != g_villainCheckout.end() && co->second.first != login &&
+        std::time(nullptr) - co->second.second < RESERVE_TTL) {
+      res.status = 423;
+      res.set_content("someone is there", "text/plain");
+      return;
+    }
+    // Leaving does NOT release the villain -- it starts the clock. The holder keeps it for VILLAIN_LOCK_TTL
+    // more, so nobody can step in behind them and take what they just fought for.
+    //
+    // But NEVER take the site off somebody who is standing in it right now. This used to assign the holder
+    // unconditionally, so a keeper who walked out stamped their own name over the keeper who had since walked
+    // IN. The right then ping-ponged: the entry that should have transferred it was silently undone by the
+    // previous holder's leave-writeback, the takeover notice never fired, and -- because /villain_loot_take
+    // only refuses a NON-holder -- the keeper who had already lost the site could keep pillaging it, taking
+    // the same items the keeper inside was picking up by hand.
+    { auto held = g_villainCheckout.find(key);
+      if (held == g_villainCheckout.end() || held->second.first == login ||
+          std::time(nullptr) - held->second.second >= VILLAIN_LOCK_TTL)
+        g_villainCheckout[key] = { login, std::time(nullptr) }; }
+    if (baseVersion >= 0 && baseVersion != it->second.version) {
+      res.status = 409;
+      res.set_content(std::to_string(it->second.version), "text/plain"); // caller refreshes and retries
+      return;
     }
     ensureDir("rar_villains");
-    std::ofstream out(villainFile(it->first), std::ios::binary);
-    out.write(blob.data(), blob.size()); out.close();
-    if (it->second.defeatTime == 0) it->second.defeatTime = std::time(nullptr);
+    if (!blob.empty()) {
+      std::ofstream out(villainFile(it->first), std::ios::binary);
+      out.write(blob.data(), blob.size());
+    }
+    { std::ofstream lout(villainLootFile(it->first), std::ios::binary);
+      lout.write(manifest.data(), manifest.size()); }
+    // Written in the SAME request as the manifest and the interior, so the three can never describe
+    // different states. Empty means "this uploader had nothing to store" -- keep whatever was there.
+    if (!lootStore.empty()) {
+      std::ofstream sout(villainLootDataFile(it->first), std::ios::binary);
+      sout.write(lootStore.data(), lootStore.size());
+    }
+    ++it->second.version;
+    if (!it->second.alive && it->second.defeatTime == 0)
+      it->second.defeatTime = std::time(nullptr);
     saveVillainState();
-    std::printf("[villain] '%s' uploaded aftermath for %s (%zu bytes)\n", login.c_str(), key.c_str(),
-        blob.size()); std::fflush(stdout);
-    res.set_content("ok", "text/plain");
+    std::printf("[villain] '%s' wrote %s (interior %zu b, manifest %zu b, loot store %zu b) -> version %lld\n",
+        login.c_str(), key.c_str(), blob.size(), manifest.size(), lootStore.size(), it->second.version);
+    std::fflush(stdout);
+    res.set_content(std::to_string(it->second.version), "text/plain");
   });
 
   // Phase B: the currently-DEAD (defeated, still in loot grace) villain positions ("x_y" per line).

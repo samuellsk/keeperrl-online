@@ -33,6 +33,10 @@ class Behavior;
 class MonsterAI {
   public:
   void makeMove();
+  // RAR: does this creature's AI hold a raw pointer to ANOTHER creature that will not survive being
+  // serialized into a villain blob and downloaded again? A summoned creature's link to its summoner is
+  // exactly that: saving it crashed in getThis(), loading it crashes in isAffected() on the first update.
+  bool rarSummonerMissingFrom(const Model* m) const;
 
   SERIALIZATION_DECL(MonsterAI);
 

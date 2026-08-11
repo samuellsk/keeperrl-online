@@ -13,6 +13,7 @@
 #define closesocket(s) ::close(s)
 #endif
 #include <fstream>
+#include <ctime>
 #include <mutex>
 #include <map>
 #include <vector>
@@ -63,6 +64,7 @@ bool g_pvpInvitePending = false;
 // respawned). Refreshed from /villain_state whenever the world map is opened; read by the map renderer +
 // travel selectability so the shared map reflects deaths/respawns live. Main-thread access only.
 std::set<std::string> g_deadVillains;
+bool g_timingVerbose = false;   // --rar_net_bench only: per-call curl phase breakdown
 
 size_t writeCb(char* ptr, size_t size, size_t nmemb, void* userdata) {
   ((std::string*) userdata)->append(ptr, size * nmemb);
@@ -116,6 +118,14 @@ bool http(const std::string& url, const std::string* postBody, std::string& out,
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &out);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L); // dungeon uploads are ~1MB; allow LAN latency
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+  // IPv4 ONLY, and this is worth two seconds per request. The server binds 0.0.0.0 -- IPv4, always -- so an
+  // IPv6 attempt can never succeed. But a hostname like "localhost" resolves to ::1 FIRST on Windows, and
+  // because openSocketKnockCb has to connect the socket itself (the knock must go out before the TLS
+  // handshake, and curl offers no hook there), that attempt is a BLOCKING connect: it sat through the full
+  // SYN-retransmit cycle, ~2s, before failing and letting curl fall back to 127.0.0.1. Measured: connect
+  // 2030 ms, TLS 2 ms, server 0 ms, and a 54KB body in 1 ms -- the entire cost of every call, on every call,
+  // including the two behind a PILLAGE click. Not visible with an IP-configured server (nothing to resolve).
+  curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
   if (url.rfind("https://", 0) == 0) {
     // The server presents a SELF-SIGNED identity, so a CA chain / hostname check is meaningless here -- the
     // PINNED PUBLIC KEY is the trust anchor instead, and it's a stronger check than either (it must be exactly
@@ -152,6 +162,20 @@ bool http(const std::string& url, const std::string* postBody, std::string& out,
   CURLcode res = curl_easy_perform(curl);
   httpCode = 0;
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+  // Diagnostic: split the wall time into connect / TLS / server-think / download. A stall that is identical
+  // for a 1-byte and a 54KB reply is not bandwidth, and only this breakdown says which phase owns it.
+  if (g_timingVerbose) {
+    double conn = 0, app = 0, pre = 0, start = 0, total = 0;
+    curl_easy_getinfo(curl, CURLINFO_CONNECT_TIME, &conn);
+    curl_easy_getinfo(curl, CURLINFO_APPCONNECT_TIME, &app);
+    curl_easy_getinfo(curl, CURLINFO_PRETRANSFER_TIME, &pre);
+    curl_easy_getinfo(curl, CURLINFO_STARTTRANSFER_TIME, &start);
+    curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total);
+    std::printf("[curl] connect %.0f ms | tls %.0f ms | request-sent %.0f ms | first-byte %.0f ms |"
+        " total %.0f ms\n", conn * 1000, (app - conn) * 1000, (pre - app) * 1000, (start - pre) * 1000,
+        total * 1000);
+    std::fflush(stdout);
+  }
   curl_easy_cleanup(curl);
   if (headers) curl_slist_free_all(headers);
   if (res != CURLE_OK) {
@@ -193,22 +217,33 @@ bool postCode(const std::string& path, const std::string& body, std::string& out
   return http(g_serverUrl + path, &body, out, code);
 }
 
+// How often the pillage/loot index is re-read. Deliberately short: this is the signal that tells a keeper
+// they have LOST a site, and every second of staleness is a second of duplicated loot.
+constexpr int RAR_LOOT_POLL_SECONDS = 5;
+
 // Launch (once per process) the background thread that pings /heartbeat every ~60s while a session is
 // active, so the server knows this computer is still logged in and doesn't free the single-session lock.
 void startHeartbeat() {
   if (g_heartbeatStarted.exchange(true))
     return; // already running
   std::thread([] {
-    while (true) {
-      for (int i = 0; i < 60; ++i)
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    for (long long tick = 1; ; ++tick) {
+      std::this_thread::sleep_for(std::chrono::seconds(1));
       if (!g_sessionActive)
         continue;
       std::string login = g_sessionLogin, pw = g_sessionPassword, token = g_sessionToken;
       if (login.empty())
         continue;
       std::string out;
-      post("/heartbeat", login + "\n" + pw + "\n" + token, out); // best-effort
+      if (tick % 60 == 0)
+        post("/heartbeat", login + "\n" + pw + "\n" + token, out); // best-effort
+      // The loot index rides a MUCH faster tick than the heartbeat. It used to be pulled only at game load and
+      // after a pillage, so a player sitting in their base never learned somebody had taken over a site. Sixty
+      // seconds is still far too slow for what this signal is FOR: until it arrives the old holder can keep
+      // pillaging a site another keeper is standing in, duplicating the items that keeper is picking up. The
+      // response is two short lines and no model is touched, so polling it every few seconds costs nothing.
+      if (tick % RAR_LOOT_POLL_SECONDS == 0)
+        rarRefreshVillainLoot();
     }
   }).detach();
 }
@@ -233,6 +268,7 @@ void rarInit(const std::string& serverUrl, const std::string& login, const std::
   g_sessionToken = tok;
 }
 
+void rarSetTimingVerbose(bool b) { g_timingVerbose = b; }
 bool rarConfigured() { return !g_serverUrl.empty(); }
 void rarSetDataFreeHash(const std::string& h) { g_dataFreeHash = h; }
 
@@ -818,13 +854,24 @@ bool rarPvpPendingInvite(std::string& sessionId, std::string& invaderName, int& 
   return true;
 }
 
+// Defined further down, next to the loot index it updates (which is declared after this point).
+void noteWeHoldLoot(const std::string& key);
+
 bool rarFetchVillain(const std::string& key, std::string& out) {
   if (key.empty())
     return false;
   long code = 0;
   std::string body;
-  if (!get("/villain/" + key, body, code) || code != 200)
+  // Identify ourselves so the server attributes the site CHECKOUT to us -- otherwise a player downloading an
+  // interior in order to pillage it would be blocked by its own hold.
+  if (!get("/villain/" + key + "?login=" + g_login, body, code) || code != 200) {
+    // 423 carries the real reason ("another keeper is in there") -- keep it so the game can say that instead
+    // of the generic "couldn't be loaded".
+    if (code == 423 && !body.empty())
+      g_lastError = body;
     return false;
+  }
+  noteWeHoldLoot(key);   // walking in took the checkout -- see noteWeHoldLoot
   out = std::move(body);
   return !out.empty();
 }
@@ -838,12 +885,175 @@ void rarMarkVillainDefeated(const std::string& key) {
 
 // Upload the post-battle aftermath of a defeated villain so grace-period revisits show the real outcome.
 // body: login\npassword\nx_y\n<blob>. best-effort; the server only accepts it for a defeated-in-grace villain.
-bool rarVillainWriteback(const std::string& key, const std::string& blob) {
-  if (g_login.empty() || key.empty() || blob.empty())
+bool rarVillainWriteback(const std::string& key, const std::string& blob, const std::string& lootManifest,
+    const std::string& lootStore, long long baseVersion, long long* outVersion) {
+  if (g_login.empty() || key.empty())
     return false;
-  std::string body = g_login + "\n" + g_password + "\n" + key + "\n" + blob;
+  std::string body = g_login + "\n" + g_password + "\n" + key + "\n" + std::to_string(baseVersion) + "\n"
+      + std::to_string(lootManifest.size()) + "\n" + std::to_string(lootStore.size()) + "\n"
+      + lootManifest + lootStore + blob;
   std::string out;
-  return post("/villain_writeback", body, out);
+  long code = 0;
+  { std::lock_guard<std::mutex> lk(g_mutex);
+    if (!http(g_serverUrl + "/villain_writeback", &body, out, code))
+      return false; }
+  // 409 carries the version somebody else already wrote -- hand it back so the caller can refresh and retry
+  // instead of silently clobbering them.
+  if (outVersion)
+    try { *outVersion = std::stoll(out); } catch (...) { *outVersion = -1; }
+  if (code == 409) {
+    g_lastError = "someone changed this site first";
+    return false;
+  }
+  if (code == 200)
+    noteWeHoldLoot(key);   // the writeback re-stamped the holder as us -- see noteWeHoldLoot
+  return code == 200;
+}
+
+namespace {
+  struct LootIndexEntry { long long version = 0; std::string owner; };
+  std::map<std::string, LootIndexEntry> g_lootIndex;   // "x_y" -> version + who holds the pillage right
+  // WRITTEN by the heartbeat thread, READ by the game thread on every panel refresh. Its own mutex, not
+  // g_mutex: that one is held across whole HTTP calls, and the panel must never block on the network.
+  std::mutex g_lootIndexMutex;
+}
+
+void rarRefreshVillainLoot() {
+  std::string body;
+  long code = 0;
+  if (!get("/villain_loot_index", body, code) || code != 200)
+    return;                                  // keep the previous answer rather than blanking the panel
+  std::map<std::string, LootIndexEntry> next;
+  std::string line;
+  auto flush = [&] {
+    if (line.empty()) return;
+    auto t1 = line.find('\t');
+    if (t1 == std::string::npos) { line.clear(); return; }
+    auto t2 = line.find('\t', t1 + 1);
+    auto t3 = (t2 == std::string::npos) ? t2 : line.find('\t', t2 + 1);
+    LootIndexEntry e;
+    try { e.version = std::stoll(line.substr(t1 + 1, t2 - t1 - 1)); } catch (...) {}
+    if (t3 != std::string::npos)
+      e.owner = line.substr(t3 + 1);
+    next[line.substr(0, t1)] = std::move(e);
+    line.clear();
+  };
+  for (char c : body) { if (c == '\n') flush(); else if (c != '\r') line += c; }
+  flush();
+  // Diagnostic: the takeover notice depends on this map, and when it fails to fire there is no way from the
+  // outside to tell "the index never refreshed" from "the tile dropped out of it" -- a site whose loot
+  // manifest goes empty vanishes from the index, which blanks the owner and suppresses the notice. Log every
+  // CHANGE (never every beat) so a two-keeper test leaves a record.
+  { std::lock_guard<std::mutex> lk(g_lootIndexMutex);
+    static std::string lastDump;
+    std::string dump;
+    for (auto& e : next)
+      dump += e.first + "=" + (e.second.owner.empty() ? std::string("(none)") : e.second.owner) + " ";
+    if (dump != lastDump) {
+      lastDump = dump;
+      rarTakeoverLog("index refresh: " + std::to_string(next.size()) + " site(s) with loot: "
+          + (dump.empty() ? std::string("(none)") : dump));
+    }
+    g_lootIndex = std::move(next); }
+}
+
+// Appends one line to rar_takeover.log next to the executable. Deliberately its own tiny file: the takeover
+// path is the one thing here that only misbehaves with two live clients, which is exactly when attaching a
+// debugger is impractical.
+void rarTakeoverLog(const std::string& msg) {
+  std::ofstream f("rar_takeover.log", std::ios::app);
+  if (!f)
+    return;
+  auto t = std::time(nullptr);
+  char buf[32];
+  std::strftime(buf, sizeof(buf), "%H:%M:%S", std::localtime(&t));
+  f << buf << "  " << msg << std::endl;
+}
+
+bool rarVillainLootAt(const std::string& key, long long* outVersion) {
+  std::lock_guard<std::mutex> lk(g_lootIndexMutex);
+  auto it = g_lootIndex.find(key);
+  if (it == g_lootIndex.end())
+    return false;
+  if (outVersion)
+    *outVersion = it->second.version;
+  return true;
+}
+
+bool rarHttpGetRaw(const std::string& path, std::string& out, long& code) {
+  return get(path, out, code);
+}
+
+// Record that the SERVER just made us the holder of this site. Both callers below know this authoritatively
+// -- entering a site takes the checkout, and a writeback re-stamps it -- but the cached index only catches up
+// on the next poll. In that gap our own row read as somebody else's, so the keeper who had just TAKEN a site
+// was told he had lost it. Seeding the answer we already know closes the window entirely instead of shrinking
+// it, so this does not depend on the poll interval.
+void noteWeHoldLoot(const std::string& key) {
+  if (key.empty() || g_login.empty())
+    return;
+  std::lock_guard<std::mutex> lk(g_lootIndexMutex);
+  auto it = g_lootIndex.find(key);
+  if (it != g_lootIndex.end())
+    it->second.owner = g_login;   // only annotate a site the index already lists as holding loot
+}
+
+std::string rarVillainLootOwner(const std::string& key) {
+  std::lock_guard<std::mutex> lk(g_lootIndexMutex);
+  auto it = g_lootIndex.find(key);
+  return it == g_lootIndex.end() ? std::string() : it->second.owner;
+}
+
+bool rarFetchVillainLootData(const std::string& key, long long* outVersion, std::string* outData) {
+  if (key.empty())
+    return false;
+  std::string body;
+  long code = 0;
+  if (!get("/villain_loot_data/" + key, body, code) || code != 200)
+    return false;
+  auto nl = body.find('\n');
+  if (nl == std::string::npos)
+    return false;
+  if (outVersion)
+    try { *outVersion = std::stoll(body.substr(0, nl)); } catch (...) { *outVersion = 0; }
+  if (outData)
+    *outData = body.substr(nl + 1);
+  return true;
+}
+
+bool rarPutVillainLootData(const std::string& key, const std::string& remaining, long long baseVersion,
+    long long* outVersion) {
+  if (g_login.empty() || key.empty())
+    return false;
+  std::string body = g_login + "\n" + g_password + "\n" + key + "\n"
+      + std::to_string(baseVersion) + "\n" + remaining;
+  std::string out;
+  long code = 0;
+  { std::lock_guard<std::mutex> lk(g_mutex);
+    if (!http(g_serverUrl + "/villain_loot_take", &body, out, code))
+      return false; }
+  if (outVersion)
+    try { *outVersion = std::stoll(out); } catch (...) { *outVersion = -1; }
+  if (code == 423) { g_lastError = "Another keeper is at that site."; return false; }
+  if (code == 409) { g_lastError = "Someone got there first."; return false; }
+  return code == 200;
+}
+
+bool rarFetchVillainLoot(const std::string& key, long long* outVersion, std::string* outManifest) {
+  if (key.empty())
+    return false;
+  std::string body;
+  long code = 0;
+  if (!get("/villain_loot/" + key, body, code) || code != 200)
+    return false;
+  auto nl = body.find('\n');
+  if (nl == std::string::npos)
+    return false;
+  if (outVersion)
+    try { *outVersion = std::stoll(body.substr(0, nl)); } catch (...) { *outVersion = 0; }
+  if (outManifest)
+    *outManifest = body.substr(nl + 1);
+  return true;
 }
 
 bool rarFetchVillainState(std::string& out) {
@@ -1090,4 +1300,39 @@ int rarClientSelfTest() {
   std::printf("[rar-client] list after delete: %s (%zu)%s\n", listed2 ? "ok" : "FAIL", after.size(),
       listed2 ? "" : (" -- " + rarLastError()).c_str());
   return (up && got == h && listed && listed2) ? 0 : 1;
+}
+
+// ---- world-map timing (see rar_client.h) ----------------------------------------------------------------
+static std::mutex g_timeMutex;
+static std::vector<std::pair<std::string, double>> g_timings;
+static std::map<std::string, std::chrono::steady_clock::time_point> g_timeStarts;
+
+void rarTimeStart(const char* label) {
+  std::lock_guard<std::mutex> lk(g_timeMutex);
+  g_timeStarts[label] = std::chrono::steady_clock::now();
+}
+
+void rarTimeEnd(const char* label) {
+  std::lock_guard<std::mutex> lk(g_timeMutex);
+  auto it = g_timeStarts.find(label);
+  if (it == g_timeStarts.end())
+    return;
+  g_timings.emplace_back(label,
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - it->second).count());
+  g_timeStarts.erase(it);
+}
+
+void rarTimeFlush(const char* what) {
+  std::lock_guard<std::mutex> lk(g_timeMutex);
+  if (g_timings.empty())
+    return;
+  std::ofstream out("rar_worldmap_timing.txt", std::ios::app);
+  if (out) {
+    out << what;
+    for (auto& t : g_timings)
+      out << "  " << t.first << "=" << (long long) t.second << "ms";
+    out << "\n";
+  }
+  g_timings.clear();
+  g_timeStarts.clear();
 }

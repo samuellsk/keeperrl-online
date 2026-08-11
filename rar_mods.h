@@ -50,3 +50,4 @@ bool rarUnbundleDataFree(const std::string& dataFreePath, const std::string& bun
 // rarHashDataFree); otherwise every file under rootPath, which is what repairing an install needs.
 // Returns the number of files written.
 int rarWriteManifest(const std::string& rootPath, const std::string& outFilePath, bool protectedOnly);
+

@@ -398,6 +398,9 @@ void Game::reconcileVillainsForLoad() {
   // the whole map. A failed/unreachable fetch also returns empty -- indistinguishable from "no villains" --
   // so treat empty as "no data" and leave the map alone rather than blanking it.
   auto roster = rarGetVillainRoster();
+  // Which sites still hold loot, in one request. Pulled here (and after each pillage) so the villains panel
+  // can answer per-site from a cache instead of hitting the network on every refresh.
+  rarRefreshVillainLoot();
   if (roster.empty())
     return;
   campaign->reconcileVillains(getContentFactory(), roster, getPlayerVillainGroups(), getPlayerTribe());
@@ -995,7 +998,13 @@ Model* Game::chooseSite(Model* current) {
     // RAR: the villain map may be unavailable (server has no blob for this tile -- e.g. an orphaned roster
     // entry). Never crash on that -- abort the travel gracefully so the player can pick another target.
     if (!models[*dest]) {
-      view->presentText(none, TString("That site's map couldn't be loaded from the server. Try another target."_s));
+      // The server refuses an invasion while another keeper holds that villain, and says so. Show ITS reason
+      // when there is one -- "another keeper is in there" is a completely different thing to the player than
+      // "couldn't be loaded", and the generic line made a working rule look like a fault.
+      auto why = rarLastError();
+      view->presentText(none, !why.empty()
+          ? TString(why)
+          : TString("That site's map couldn't be loaded from the server. Try another target."_s));
       return nullptr;
     }
     return models[*dest].get();
@@ -1077,7 +1086,7 @@ optional<Game::VillainWriteback> Game::takeVillainWriteback() {
         villainCol = col;
         break;
       }
-    const bool conquered = !!villainCol;
+    const bool keepLoaded = !!villainCol;
     if (!villainCol)
       for (Collective* col : m->getCollectives())
         if (isConquerableSite(col->getVillainType())) {
@@ -1103,7 +1112,7 @@ optional<Game::VillainWriteback> Game::takeVillainWriteback() {
     if (auto pc = getPlayerCollective())
       if (int given = pc->forgetPositionsOn(m))
         INFO << "RAR: released " << given << " claimed squares inside the site at " << v;
-    return VillainWriteback{ v, models[v].giveMeSharedPointer(), enemyId, villainCol->getVillainType(), conquered };
+    return VillainWriteback{ v, models[v].giveMeSharedPointer(), enemyId, villainCol->getVillainType(), keepLoaded };
   }
   return none;
 }
@@ -1283,6 +1292,20 @@ Model* Game::addInvasionSite(Vec2 pos, PModel model, SavedGameInfo info) {
 
 void Game::setVillainLoader(function<PModel(Vec2)> loader) {
   villainLoader = std::move(loader);
+}
+
+void Game::setVillainPillager(function<bool(Vec2, int, long long, string&, bool&)> f) {
+  villainPillager = std::move(f);
+}
+
+bool Game::rarPillageSite(Vec2 pos, int colIndex, long long baseVersion, string& outMessage,
+    bool& outFactionEmptied) {
+  outFactionEmptied = false;
+  if (!villainPillager) {
+    outMessage = "Not connected.";
+    return false;
+  }
+  return villainPillager(pos, colIndex, baseVersion, outMessage, outFactionEmptied);
 }
 
 Model* Game::injectSiteModel(Vec2 pos, PModel model) {

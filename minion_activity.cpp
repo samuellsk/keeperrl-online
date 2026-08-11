@@ -232,10 +232,24 @@ Task* MinionActivities::getExisting(Collective* collective, Creature* c, MinionA
   return collective->getTaskMap().getClosestTask(c, activity, false, collective);
 }
 
+// A crafter finishes an item straight into its own inventory, and this drop check runs before the activity
+// generator -- so holding ONE item was enough to abandon the workshop, walk to the storeroom and walk back.
+// For a queue of any length that is mostly walking. Let a crafter keep working until it is carrying a real
+// load, then make a single trip with everything.
+//
+// Deliberately capped well below the actual carry limit: at the limit the creature is already encumbered, and
+// the last item crafted could push it over. This leaves room for one more item plus whatever it picked up.
+//
+// No risk of items being held forever: MinionActivity::CRAFT is only available while the workshop has
+// something craftable (its predicate calls Workshops::isIdle), so when the queue empties the activity changes
+// on its own and the drop below fires with the whole batch.
 PTask MinionActivities::generateDropTask(Collective* collective, Creature* c, MinionActivity task) {
-  if (task != MinionActivity::HAULING)
+  if (task != MinionActivity::HAULING) {
+    if (task == MinionActivity::CRAFT && !c->isCarryingFractionOfLimit(craftCarryFraction))
+      return nullptr;
     if (PTask ret = getDropItemsTask(collective, c))
       return ret;
+  }
   return nullptr;
 }
 

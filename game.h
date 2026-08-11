@@ -229,9 +229,10 @@ class Game : public OwnedObject<Game> {
   // state is stable), mark it captured so it isn't re-processed, and hand back its model for serialize+upload.
   // Returns none if the team is still inside or nothing is pending. The caller uploads the aftermath, then
   // calls destroyInvasionSite(pos) to fully drop the model. type/enemyId rebuild the retired-site header.
-  // `conquered` distinguishes the two flows: a conquered site keeps its model alive locally so PILLAGE can be
-  // used from base, while a site that was merely visited is released once its state has been written back.
-  struct VillainWriteback { Vec2 pos; shared_ptr<Model> model; string enemyId; VillainType type; bool conquered; };
+  // `keepLoaded`: this site still has something the player can come back for -- it was conquered, or a
+  // sub-faction on it was wiped and its loot is pillageable -- so the model stays resident and PILLAGE can
+  // reach into it from base. A site that was merely visited is released once its state is written back.
+  struct VillainWriteback { Vec2 pos; shared_ptr<Model> model; string enemyId; VillainType type; bool keepLoaded; };
   optional<VillainWriteback> takeVillainWriteback();
   // RAR: the villain at this world tile changed AFTER its aftermath was already captured -- the player pillaged
   // loot off it from base. Clear its "already written back" mark so takeVillainWriteback re-captures and
@@ -242,6 +243,36 @@ class Game : public OwnedObject<Game> {
   // RAR: unwind every reference into a downloaded site and free it. removeDweller=false keeps the villain on
   // the world map (only the loaded interior goes); destroyInvasionSite passes true for a rival keeper.
   void releaseSiteModel(Vec2 pos, bool removeDweller);
+  struct RarSiteLoot {
+    TString name;        // the faction we beat there
+    ViewIdList viewId;   // ...and its own icon, so the row's picture matches its title
+  };
+  void rarMarkSiteHasMyLoot(Vec2 pos, int colIndex, TString defeatedName, ViewIdList defeatedViewId) {
+    rarSitesWithMyLoot[make_pair(pos, colIndex)] =
+        RarSiteLoot{ std::move(defeatedName), std::move(defeatedViewId) };
+  }
+  void rarClearSiteLoot(Vec2 pos, int colIndex) { rarSitesWithMyLoot.erase(make_pair(pos, colIndex)); }
+  void rarClearSiteLoot(Vec2 pos) {           // whole tile: used when the site is taken over or emptied
+    for (auto it = rarSitesWithMyLoot.begin(); it != rarSitesWithMyLoot.end();)
+      it = (it->first.first == pos) ? rarSitesWithMyLoot.erase(it) : std::next(it);
+  }
+  bool rarSiteHasMyLoot(Vec2 pos) const {
+    for (auto& e : rarSitesWithMyLoot)
+      if (e.first.first == pos)
+        return true;
+    return false;
+  }
+  const map<pair<Vec2, int>, RarSiteLoot>& rarGetSitesWithMyLoot() const { return rarSitesWithMyLoot; }
+  // RAR: a site-lost notice waiting to be shown full-screen. Raised where the loss is DETECTED (while the
+  // villain panel is being rebuilt) and shown from a place that is allowed to open a window -- putting a modal
+  // up from inside panel construction re-enters the view while it is being filled in. Transient like the loot
+  // map above: never serialized, so it cannot reach a save.
+  void rarQueueTakeoverPopup(TString text) { rarPendingTakeover = std::move(text); }
+  optional<TString> rarTakePendingTakeoverPopup() {
+    auto ret = std::move(rarPendingTakeover);
+    rarPendingTakeover = none;
+    return ret;
+  }
   // RAR: label an injected villain with its enemyId, so a later writeback can rebuild the retired-site header.
   void recordInjectedVillain(Vec2 pos, const string& enemyId);
   // RAR: true while the player is mid-invasion -- an active keeper invasion OR controlling a team AWAY from
@@ -267,6 +298,11 @@ class Game : public OwnedObject<Game> {
   // RAR Phase A: callback that fetches+loads a villain's model for a world position (set by MainLoop when
   // online). chooseSite uses it to lazily materialise a villain the moment the player travels there.
   void setVillainLoader(function<PModel(Vec2)>);
+  // RAR remote pillage. Same seam as villainLoader: PlayerControl can't reach MainLoop, and the work needs
+  // MainLoop's download + serialize. Not serialized -- reinstalled each run when online.
+  void setVillainPillager(function<bool(Vec2, int, long long, string&, bool&)>);
+  bool rarPillageSite(Vec2 pos, int colIndex, long long baseVersion, string& outMessage,
+      bool& outFactionEmptied);
 
   ~Game();
 
@@ -281,6 +317,7 @@ class Game : public OwnedObject<Game> {
 
   private:
   function<PModel(Vec2)> villainLoader; // not serialized -- MainLoop re-installs it each run when online
+  function<bool(Vec2, int, long long, string&, bool&)> villainPillager; // ditto, for remote pillage
   void tick(GlobalTime);
   bool updateModel(Model*, double timeDiff, optional<milliseconds> endTime);
   void uploadEvent(const string& name, const map<string, string>&);
@@ -326,6 +363,16 @@ class Game : public OwnedObject<Game> {
       map<Creature*, TribeId> savedTribes; }; // RAR: team's real tribes while retagged to Invaders
   optional<ActiveInvasion> activeInvasion;             // RAR transient: live invasion
   map<Vec2, string> injectedVillainEnemyId;            // RAR transient: enemyId per downloaded villain (writeback header)
+  // RAR pillage: tiles where THIS keeper defeated a faction and walked out leaving its loot behind, mapped to
+  // THAT FACTION's name. The panel must say who was actually beaten ("Elves"), not who owns the tile
+  // ("Unicorns") -- a site can hold several factions and killing one says nothing about the others.
+  // TRANSIENT by design: it must not bloat the save, and it is only a hint for the panel -- the loot itself
+  // lives on the server, so losing this on reload costs a button, never any loot.
+  // Keyed by (tile, collective index) -- a site can hold several factions and you may have beaten more than
+  // one. Keying by tile alone collapsed them into a single row named after whichever came first, and
+  // pillaging it emptied all of them at once.
+  map<pair<Vec2, int>, RarSiteLoot> rarSitesWithMyLoot;
+  optional<TString> rarPendingTakeover;   // transient, NOT serialized -- see rarQueueTakeoverPopup
   set<Vec2> villainWrittenBack;                        // RAR transient: villain positions already aftermath-captured
   // RAR villain waves. A world-map villain's model is only downloaded when the player TRAVELS there, so its
   // VillageControl never runs at the base and the vanilla attack path is dead. considerVillainWaves() rebuilds

@@ -16,6 +16,7 @@
 #include "stdafx.h"
 
 #include "creature.h"
+#include "monster.h"
 #include "creature_factory.h"
 #include "level.h"
 #include "item.h"
@@ -330,6 +331,12 @@ bool Creature::isDead() const {
 
 GlobalTime Creature::getDeathTime() const {
   return *deathTime;
+}
+
+bool Creature::rarIsOrphanedSummon(const Model* m) const {
+  if (auto monster = dynamic_cast<const Monster*>(getController()))
+    return monster->rarSummonerMissingFrom(m);
+  return false;
 }
 
 void Creature::clearLastCombatIntent() {
@@ -694,6 +701,13 @@ TString Creature::getPluralAName(Item* item, int num) const {
 bool Creature::canCarryMoreWeight(double weight) const {
   return getBody().getCarryLimit() >= equipment->getTotalWeight() ||
       isAffected(LastingEffect::NO_CARRY_LIMIT);
+}
+
+bool Creature::isCarryingFractionOfLimit(double fraction) const {
+  if (isAffected(LastingEffect::NO_CARRY_LIMIT))
+    return false;                       // no limit to be near
+  int limit = getBody().getCarryLimit();
+  return limit > 0 && equipment->getTotalWeight() >= double(limit) * fraction;
 }
 
 int Creature::canCarry(const vector<Item*>& items) const {

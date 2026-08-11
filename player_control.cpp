@@ -1221,6 +1221,222 @@ vector<Item*> PlayerControl::getPillagedItems(Collective* col) const {
   return ret;
 }
 
+// See the header. Deliberately built on getPillagedItems(): the manifest and the actual pillage must agree,
+// so they share the one function that decides what is takeable. Only DEFEATED collectives are listed -- a
+// live one still has creatures that pick things up, which would make the manifest stale the moment it is
+// written; "defeated first" is what makes this cacheable at all.
+string PlayerControl::buildLootManifest(Model* model) const {
+  if (!model)
+    return "";
+  const auto levels = model->getLevels();
+  string ret;
+  int colIndex = 0;
+  for (Collective* col : model->getCollectives()) {
+    ++colIndex;
+    if (!col->isConquered())
+      continue;
+    // The DECISION of what is takeable stays in getPillagedItems -- we only recover which position each item
+    // sits on, by walking the same pillage positions and keeping the ones it approved. Duplicating the filter
+    // here would let the manifest and the real pillage drift apart, which is the whole thing to avoid.
+    auto takeable = getPillagedItems(col);
+    if (takeable.empty())
+      continue;
+    HashSet<Item*> approved;
+    for (auto it : takeable)
+      approved.insert(it);
+    for (Position v : col->getTerritory().getPillagePositions()) {
+      int levelIndex = -1;
+      for (int i : All(levels))
+        if (levels[i] == v.getLevel()) {
+          levelIndex = i;
+          break;
+        }
+      HashMap<string, int> countByView;   // ViewId: a stable content id, so the reader localises it itself
+      for (Item* it : v.getItems())
+        if (approved.count(it))
+          ++countByView[string(it->getViewObject().id().data())];
+      for (auto& elem : countByView)
+        ret += toString(colIndex) + "	" + toString(levelIndex) + "	" + toString(v.getCoord().x) + "	"
+            + toString(v.getCoord().y) + "\t" + toString(elem.second) + "\t" + elem.first + "\n";
+    }
+  }
+  return ret;
+}
+
+// See the header. Measured on real sites: 8 items -> 2.5KB, 78 items -> 31KB, serialized in under a
+// millisecond -- against a 200KB (12MB raw) interior whose re-serialization is what crashes on a model that
+// has already been round-tripped once.
+// One stored loot item: the item itself plus where it was standing, so a revisit can put the remainder back
+// exactly where it was. At namespace scope because a local class cannot declare a template member.
+namespace {
+struct RarLootEntry {
+  int colIndex = 0;
+  int levelIndex = -1;
+  int x = 0, y = 0;
+  PItem item;
+  template <class Archive> void serialize(Archive& ar, const unsigned) { ar(colIndex, levelIndex, x, y, item); }
+};
+}
+
+string PlayerControl::buildLootStore(Model* model) {
+  if (!model)
+    return "";
+  const auto levels = model->getLevels();
+  vector<RarLootEntry> entries;
+  vector<pair<Position, Item*>> putBack;   // (where, which) so the interior can be restored exactly
+  int colIndex = 0;
+  for (Collective* col : model->getCollectives()) {
+    ++colIndex;
+    if (!col->isConquered())
+      continue;
+    auto takeable = getPillagedItems(col);
+    if (takeable.empty())
+      continue;
+    HashSet<Item*> approved;
+    for (auto it : takeable)
+      approved.insert(it);
+    for (Position v : col->getTerritory().getPillagePositions()) {
+      int levelIndex = -1;
+      for (int i : All(levels))
+        if (levels[i] == v.getLevel()) {
+          levelIndex = i;
+          break;
+        }
+      for (Item* it : copyOf(v.getInventory().getItems()))
+        if (approved.count(it)) {
+          RarLootEntry e;
+          e.colIndex = colIndex;
+          e.levelIndex = levelIndex;
+          e.x = v.getCoord().x;
+          e.y = v.getCoord().y;
+          e.item = v.removeItem(it);        // detach: only a PItem can be serialized
+          putBack.push_back(make_pair(v, e.item.get()));
+          entries.push_back(std::move(e));
+        }
+    }
+  }
+  if (entries.empty())
+    return "";
+  std::stringstream ss;
+  { OutputArchive ar(ss); ar << entries; }
+  // The items STAY extracted now: the store is the authority, pillage reads it, and a revisit has them put
+  // back by reinjectLootStore. Leaving them in the interior as well would show loot that the list says is
+  // already gone.
+  return ss.str();
+}
+
+string PlayerControl::pillageFromStore(const string& storeData, int colIndex, bool& tookAny,
+    bool& emptied) {
+  tookAny = false;
+  emptied = false;
+  if (storeData.empty())
+    return storeData;
+  vector<RarLootEntry> entries;
+  try {
+    std::stringstream in(storeData);
+    InputArchive ar(in);
+    ar >> entries;
+  } catch (...) {
+    return storeData;                      // unreadable store: leave it exactly as it was
+  }
+  auto factory = getGame()->getContentFactory();
+  ScriptedUIState state;
+  while (1) {
+    // Only this faction's loot, and only what is still here.
+    vector<int> mine;
+    vector<Item*> items;
+    for (int i : All(entries))
+      if (entries[i].colIndex == colIndex && entries[i].item) {
+        mine.push_back(i);
+        items.push_back(entries[i].item.get());
+      }
+    if (items.empty())
+      break;
+    struct Option { vector<int> idx; vector<Item*> items; StoragePositions storage; };
+    vector<Option> options;
+    for (auto& stack : Item::stackItems(factory, items)) {
+      Option o;
+      o.items = stack;
+      for (auto it : stack)
+        for (int i : mine)
+          if (entries[i].item.get() == it)
+            o.idx.push_back(i);
+      o.storage = collective->getStoragePositions(stack.front()->getStorageIds());
+      options.push_back(std::move(o));
+    }
+    auto take = [&] (const Option& o) {
+      if (o.storage.empty())
+        return;                            // no storage for this kind -- the row is not clickable anyway
+      vector<PItem> taken;
+      for (int i : o.idx)
+        if (entries[i].item)
+          taken.push_back(std::move(entries[i].item));
+      if (!taken.empty()) {
+        Random.choose(o.storage.asVector()).dropItems(std::move(taken));
+        tookAny = true;
+      }
+    };
+    auto data = ScriptedUIDataElems::Record{};
+    bool chosen = false;
+    data.elems["title"] = TString(TStringId("PILLAGE"));
+    data.elems["is_trade_or_pillage"] = TString("blabla"_s);
+    data.elems["choose_all"] = ScriptedUIDataElems::Callback { [&] {
+      for (auto& o : options)
+        take(o);
+      chosen = true;
+      return true;
+    }};
+    auto elems = ScriptedUIDataElems::List{};
+    for (auto& o : options) {
+      auto elem = getItemRecord(factory, o.items);
+      // Same rule as handlePillage: a stack you have nowhere to put is SHOWN but not clickable, never a
+      // refusal to open the window.
+      if (!o.storage.empty())
+        elem.elems["callback"] = ScriptedUIDataElems::Callback { [&take, &o, &chosen] {
+          take(o);
+          chosen = true;
+          return true;
+        }};
+      elems.push_back(elem);
+    }
+    data.elems["elems"] = std::move(elems);
+    getView()->scriptedUI("pillage_menu", data, state);
+    if (!chosen)
+      break;
+  }
+  // Whatever is left, in the same format, ready to go back to the server. Also report whether THIS faction
+  // is now empty: the panel keeps its row until the loot is actually gone (or somebody takes the site over),
+  // so merely opening the window and closing it must not consume the entry.
+  vector<RarLootEntry> left;
+  emptied = true;
+  for (auto& e : entries)
+    if (e.item) {
+      if (e.colIndex == colIndex)
+        emptied = false;
+      left.push_back(std::move(e));
+    }
+  std::stringstream out;
+  { OutputArchive ar(out); ar << left; }
+  return out.str();
+}
+
+void PlayerControl::reinjectLootStore(Model* model, const string& storeData) {
+  if (!model || storeData.empty())
+    return;
+  vector<RarLootEntry> entries;
+  try {
+    std::stringstream in(storeData);
+    InputArchive ar(in);
+    ar >> entries;
+  } catch (...) {
+    return;
+  }
+  const auto levels = model->getLevels();
+  for (auto& e : entries)
+    if (e.item && e.levelIndex >= 0 && e.levelIndex < (int) levels.size())
+      Position(Vec2(e.x, e.y), levels[e.levelIndex]).dropItem(std::move(e.item));
+}
+
 void PlayerControl::handlePillage(Collective* col) {
   ScrollPosition scrollPos;
   auto factory = getGame()->getContentFactory();
@@ -2135,15 +2351,22 @@ void PlayerControl::refreshGameInfo(GameInfo& gameInfo) const {
       if (col->getName() && col->isDiscoverable())
         if (auto model = col->getModel())
           alreadyListed.insert(model->position);
-    for (auto& elem : getGame()->getVillainWaves()) {
-      const Vec2 pos = elem.first;
+    auto& allWaves = getGame()->getVillainWaves();
+    set<Vec2> toReport;
+    for (auto& w : allWaves)
+      toReport.insert(w.first);
+
+    for (const Vec2 pos : toReport) {
+      auto waveIt = allWaves.find(pos);
+      static const Game::VillainWave noWave {};
+      const auto& wave = (waveIt != allWaves.end()) ? waveIt->second : noWave;
       if (alreadyListed.count(pos))
         continue;
       // List it if it is provoked, has a wave inbound, OR has attackers still alive on our map -- without the
       // last case a landed wave would drop out of the panel entirely and could never show as "attacking".
-      const bool hasLiveAttackers = std::any_of(elem.second.attackers.begin(), elem.second.attackers.end(),
+      const bool hasLiveAttackers = std::any_of(wave.attackers.begin(), wave.attackers.end(),
           [](const Creature* c) { return c && !c->isDead(); });
-      if (elem.second.triggers.empty() && !elem.second.scheduled && !hasLiveAttackers)
+      if (wave.triggers.empty() && !wave.scheduled && !hasLiveAttackers)
         continue;                                    // nothing to report about this one
       auto villain = campaign.getSites()[pos].getVillain();
       if (!villain || campaign.isDefeated(pos))
@@ -2176,7 +2399,7 @@ void PlayerControl::refreshGameInfo(GameInfo& gameInfo) const {
       // scheduled (that is still 800-1500 turns out, and showing red then made it look like the attack had
       // already come and gone). A stunned attacker counts as out of the fight, same as the endless waves treat it.
       info.attacking = false;
-      for (auto c : elem.second.attackers)
+      for (auto c : wave.attackers)
         if (c && !c->isDead() && !c->isAffected(LastingEffect::STUNNED)) {
           info.attacking = true;
           break;
@@ -2184,11 +2407,57 @@ void PlayerControl::refreshGameInfo(GameInfo& gameInfo) const {
       // Synthetic id: these have no Collective. Only used for the panel's dismiss set (no action is offered),
       // and offset far past real collective ids so it can't collide with one.
       info.id = UniqueEntity<Collective>::Id(1000000000LL + pos.x * 1000LL + pos.y);
-      for (auto& t : elem.second.triggers)
+      for (auto& t : wave.triggers)
         info.triggers.push_back({getTriggerLabel(t.trigger), t.value});
       gameInfo.villageInfo.villages.push_back(std::move(info));
     }
   }
+  // PILLAGE rows -- one per faction we beat, never one per tile. A site can hold several factions and you may
+  // have cleared more than one; collapsing them into a single row named after whichever came first also meant
+  // pillaging it emptied all of them at once. The collective index is folded into the row id so the action
+  // knows which faction to open.
+  if (rarEnabled())
+    for (auto& elem : getGame()->rarGetSitesWithMyLoot()) {
+      const Vec2 pos = elem.first.first;
+      const int colIndex = elem.first.second;
+      const string key = toString(pos.x) + "_" + toString(pos.y);
+      // Taken over by somebody else? Say so once and drop every row for that tile. An EMPTY owner means the
+      // holder logged out or timed out, which frees the site rather than transferring it -- not a takeover.
+      auto owner = rarVillainLootOwner(key);
+      { // log only when the answer changes, so this is a handful of lines per session, not per frame
+        static map<string, string> lastSeen;
+        auto seen = owner + "|" + rarSessionLogin();
+        if (lastSeen[key] != seen) {
+          lastSeen[key] = seen;
+          rarTakeoverLog("pillage row " + key + ": holder='" + owner + "' me='" + rarSessionLogin()
+              + "' -> " + (owner.empty() ? "no holder published (tile absent from index, or freed)"
+                                         : (owner == rarSessionLogin() ? "still mine" : "TAKEN OVER")));
+        }
+      }
+      if (!owner.empty() && owner != rarSessionLogin()) {
+        auto self = const_cast<PlayerControl*>(this);
+        self->addMessage(PlayerMessage(TString("Another keeper has taken over the site"_s),
+            MessagePriority::HIGH));
+        self->addMessage(PlayerMessage(elem.second.name, MessagePriority::HIGH));
+        // A line in the message log is not enough for this one. Losing the site is not news about the world,
+        // it is the loss of an action the player still has open in front of them -- so it goes up across the
+        // screen and has to be acknowledged. Queued rather than shown here: this runs while the villain panel
+        // is being built, and opening a modal from inside that re-enters the view mid-refresh.
+        getGame()->rarQueueTakeoverPopup(elem.second.name);
+        getGame()->rarClearSiteLoot(pos);
+        break;                       // the map just changed under us; the next refresh reports what is left
+      }
+      VillageInfo::Village info;
+      info.name = elem.second.name;
+      info.viewId = elem.second.viewId;
+      info.type = VillainType::NONE;
+      info.access = VillageInfo::Village::LOCATION;
+      info.isConquered = true;
+      info.attacking = false;
+      info.action = VillageAction::PILLAGE;
+      info.id = UniqueEntity<Collective>::Id(1000000000LL + colIndex * 10000000LL + pos.x * 1000LL + pos.y);
+      gameInfo.villageInfo.villages.push_back(std::move(info));
+    }
   gameInfo.villageInfo.dismissedInfos = dismissedVillageInfos;
   std::stable_sort(gameInfo.villageInfo.villages.begin(), gameInfo.villageInfo.villages.end(),
        [](const auto& v1, const auto& v2) { return (int) v1.type < (int) v2.type; });
@@ -2288,7 +2557,14 @@ void PlayerControl::updateMinionVisibility(const Creature* c) {
   auto visibleTiles = c->getVisibleTiles();
   visibilityMap->update(c, visibleTiles);
   for (auto& pos : visibleTiles) {
-    if (collective->addKnownTile(pos) && c->getPosition().dist8(pos).value_or(11) <= 10)
+    collective->addKnownTile(pos);
+    // Discovery is deliberately NOT gated on addKnownTile's return value any more. That returns true only the
+    // FIRST time a tile is revealed, and && evaluated it before the distance test -- so a villain's territory
+    // tile first glimpsed from more than 10 squares away burned its single chance: the fog lifted, the villain
+    // was never marked discovered, and no later approach could ever fix it because the tile was no longer new.
+    // That is the green "?" that sticks and cannot be cleared by any amount of exploring. Across open ground
+    // (a desert tomb, say) seeing a settlement from >10 squares away is the normal case, not a rare one.
+    if (c->getPosition().dist8(pos).value_or(11) <= 10)
       updateKnownLocations(pos);
     addToMemory(pos);
   }
@@ -2451,8 +2727,14 @@ void PlayerControl::updateKnownLocations(const Position& pos) {
           addMessage(PlayerMessage("Your minions discover a new location.").setLocation(loc));
       }*/
   if (auto game = getGame()) // check in case this method is called before Game is constructed
-    for (Collective* col : game->getCollectives())
-      if (col != collective && col->getTerritory().contains(pos)) {
+    for (Collective* col : game->getCollectives()) {
+      if (col == collective)
+        continue;
+      // Now that this runs for every nearby visible tile rather than only newly revealed ones, skip the
+      // territory lookup for collectives there is nothing left to learn about.
+      if (collective->isKnownVillain(col) && collective->isKnownVillainLocation(col))
+        continue;
+      if (col->getTerritory().contains(pos)) {
         collective->addKnownVillain(col);
         if (!collective->isKnownVillainLocation(col)) {
           if (auto& a = col->getConfig().discoverAchievement)
@@ -2464,6 +2746,7 @@ void PlayerControl::updateKnownLocations(const Position& pos) {
                   MessagePriority::HIGH).setPosition(pos));
         }
       }
+    }
 }
 
 
@@ -2882,6 +3165,13 @@ void PlayerControl::handleBanishing(Creature* c) {
 }
 
 void PlayerControl::processInput(View* view, UserInput input) {
+  // RAR: a queued "site taken over" notice goes up here as well as in update(). The turn-driven path alone
+  // did not actually put a window on screen -- the rows vanished, which is the same code block, but the modal
+  // never appeared -- and this is the site where presentText is already known to work in this file (the
+  // PILLAGE handler below uses it). Any input at all flushes it, so the player cannot miss the loss of a
+  // pillage right that is still sitting in their panel.
+  if (auto lost = getGame()->rarTakePendingTakeoverPopup())
+    view->presentText(TString("Another keeper has taken over the site"_s), *lost);
   switch (input.getId()) {
     case UserInputId::MESSAGE_INFO:
       if (auto message = findMessage(input.get<PlayerMessage::Id>())) {
@@ -3311,6 +3601,29 @@ void PlayerControl::processInput(View* view, UserInput input) {
       break;
     case UserInputId::VILLAGE_ACTION: {
       auto& info = input.get<VillageActionInfo>();
+      // A world-map site has no local collective -- its row carries the synthetic id refreshGameInfo built
+      // from its tile. Decode it and pillage over the network instead of looking up a Collective that was
+      // never loaded.
+      if (info.id.getGenericId() >= 1000000000LL) {
+        auto raw = info.id.getGenericId() - 1000000000LL;
+        const int colIndex = int(raw / 10000000LL);       // folded in when the row was built
+        raw %= 10000000LL;
+        Vec2 pos(int(raw / 1000), int(raw % 1000));
+        const string key = toString(pos.x) + "_" + toString(pos.y);
+        long long version = -1;
+        rarVillainLootAt(key, &version);
+        string msg;
+        bool emptied = false;
+        if (!getGame()->rarPillageSite(pos, colIndex, version, msg, emptied))
+          getView()->presentText(none, TString(msg));
+        rarRefreshVillainLoot();          // win or lose, the panel must show what is actually there now
+        // Only drop the row when its loot is ACTUALLY gone. Opening the window and closing it -- because you
+        // have nowhere to put anything yet -- must leave the entry for later; it is cleared by taking the
+        // loot, by another keeper taking the site over, or by right-clicking it like any other panel row.
+        if (emptied)
+          getGame()->rarClearSiteLoot(pos, colIndex);
+        break;
+      }
       if (Collective* village = getVillain(info.id))
         switch (info.action) {
           case VillageAction::TRADE:
@@ -3961,6 +4274,10 @@ void PlayerControl::considerTogglingCaptureOrderOnMinions() const {
 }
 
 void PlayerControl::update(bool currentlyActive) {
+  // RAR: show a queued "site taken over" notice. Here rather than where it is detected, because this is a
+  // point where opening a window is safe -- see rarQueueTakeoverPopup.
+  if (auto lost = getGame()->rarTakePendingTakeoverPopup())
+    getView()->presentText(TString("Another keeper has taken over the site"_s), *lost);
   considerTogglingCaptureOrderOnMinions();
   vector<Creature*> addedCreatures;
   vector<Level*> currentLevels {getCurrentLevel()};

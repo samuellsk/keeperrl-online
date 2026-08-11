@@ -36,6 +36,10 @@ ControllerFactory Monster::getFactory(MonsterAIFactory f) {
   return ControllerFactory([=](Creature* c) { return makeOwner<Monster>(c, f);});
 }
 
+bool Monster::rarSummonerMissingFrom(const Model* m) const {
+  return !!monsterAI && monsterAI->rarSummonerMissingFrom(m);
+}
+
 void Monster::makeMove() {
   if (dragTask && dragTask->isDone())
     dragTask.clear();

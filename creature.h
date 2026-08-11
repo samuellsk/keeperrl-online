@@ -66,6 +66,11 @@ class ContentFactory;
 struct AutomatonPart;
 struct PromotionInfo;
 
+// How loaded a crafter gets before it stops working and makes one trip to storage. Shared by the producing
+// side (stop crafting) and the AI side (go store it) so the two can never disagree and leave a minion either
+// looping to the storeroom per item, or forced past its carry limit.
+constexpr double craftCarryFraction = 0.8;
+
 class Creature : public Renderable, public UniqueEntity<Creature>, public OwnedObject<Creature>, public EventListener<Creature> {
   public:
   Creature(const ViewObject&, TribeId, CreatureAttributes, SpellMap);
@@ -151,6 +156,7 @@ class Creature : public Renderable, public UniqueEntity<Creature>, public OwnedO
   bool isDead() const;
   void clearInfoForRetiring();
   void clearLastCombatIntent(); // RAR: drop the raw Creature* combat-intent (e.g. before a foreign model is freed)
+  bool rarIsOrphanedSummon(const Model* m) const; // RAR: a summon whose summoner is not on model m
   optional<TString> getDeathReason() const;
   GlobalTime getDeathTime() const;
   struct KillInfo {
@@ -177,6 +183,12 @@ class Creature : public Renderable, public UniqueEntity<Creature>, public OwnedO
   vector<Item*> getPickUpOptions() const;
   CreatureAction pickUp(const vector<Item*>& item) const;
   bool canCarryMoreWeight(double) const;
+  // How many of these this creature could still pick up (0 = already at its limit). The honest weight check --
+  // canCarryMoreWeight ignores its argument and only looks at the CURRENT load.
+  int canCarry(const vector<Item*>&) const;
+  // Carrying at least this fraction of the carry limit. Used to batch crafting: a crafter keeps working while
+  // it has room and makes ONE trip to storage when it is nearly loaded, instead of a trip per item.
+  bool isCarryingFractionOfLimit(double fraction) const;
   CreatureAction drop(const vector<Item*>& item) const;
   void drop(vector<PItem> item);
   CreatureAction attack(Creature*) const;
@@ -382,7 +394,6 @@ class Creature : public Renderable, public UniqueEntity<Creature>, public OwnedO
 
   CreatureAction moveTowards(Position, bool away, NavigationFlags);
   optional<MovementInfo> spendTime(TimeInterval = 1_visible, SpeedModifier = SpeedModifier::NORMAL);
-  int canCarry(const vector<Item*>&) const;
   void addMovementInfo(MovementInfo);
 
   HeapAllocated<CreatureAttributes> SERIAL(attributes);

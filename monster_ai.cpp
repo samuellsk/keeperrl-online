@@ -61,6 +61,8 @@ class Behaviour {
   public:
   Behaviour(Creature*);
   virtual MoveInfo getMove() { return NoMove; }
+  // See MonsterAI::rarSummonerMissingFrom. Only Summoned answers anything but false.
+  virtual bool summonerMissingFrom(const Model*) const { return false; }
   virtual void onAttacked(const Creature* attacker) {}
   virtual double itemValue(const Item*) { return 0; }
   Item* getBestWeapon();
@@ -782,6 +784,23 @@ class Wait : public Behaviour {
 
 class Summoned : public GuardTarget {
   public:
+  // A summon lives entirely off this raw pointer: getMove dereferences `target` three times before it checks
+  // anything else, and dieTime is declared, serialized and never read -- so there is no expiry, only "is my
+  // summoner still there".
+  //
+  // Nothing carries a summon when its summoner leaves a tile: `companions` is a different mechanism, and a
+  // Summoned creature is not in it. So the moment the summoner walks out, this creature is an orphan holding
+  // a pointer into another model -- which is what cannot be serialized (getThis() fails) and cannot be loaded
+  // (isAffected() reads freed memory).
+  //
+  // Answer TRUE only for that orphan case. A villain's own summons, whose summoner is alive and standing on
+  // the same model, serialize perfectly well and stay part of the site's defences.
+  virtual bool summonerMissingFrom(const Model* m) const override {
+    if (!target || target->isDead())
+      return true;                       // summoner gone: getMove would kill it on its next turn anyway
+    auto level = target->getLevel();
+    return !level || level->getModel() != m;
+  }
   Summoned(Creature* c, Creature* _target, double minDist, double maxDist)
       : GuardTarget(c, minDist, maxDist), target(_target) {
   }
@@ -1219,6 +1238,13 @@ MonsterAI::MonsterAI(Creature* c, const vector<Behaviour*>& beh, const vector<in
   CHECK(beh.size() == w.size());
   for (auto b : beh)
     behaviours.push_back(PBehaviour(b));
+}
+
+bool MonsterAI::rarSummonerMissingFrom(const Model* m) const {
+  for (auto& b : behaviours)
+    if (b->summonerMissingFrom(m))
+      return true;
+  return false;
 }
 
 void MonsterAI::makeMove() {

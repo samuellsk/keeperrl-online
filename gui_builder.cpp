@@ -4728,6 +4728,9 @@ SGuiElem GuiBuilder::drawCampaignGrid(const Campaign& c, const vector<pair<Vec2,
   LabelPlacer labelPlacer(sites.getBounds(), iconSize);
   auto yRange = sites.getBounds().getYRange();
   auto xRange = sites.getBounds().getXRange();
+  // Difficulty numbers for the whole map in one pass. The tooltip below needs this per tile, and asking
+  // getBaseLevelIncrease() per tile re-scanned every site each time -- quadratic, on every world-map open.
+  auto baseLevelIncreases = c.getBaseLevelIncreases();
   // RAR: only auto-center on the initial position ONCE (when it first appears or changes).
   // Previously this ran every re-render, so clicking a site snapped the view back to the
   // default start position. Now the player's browsed/dragged scroll position is preserved.
@@ -4799,7 +4802,7 @@ SGuiElem GuiBuilder::drawCampaignGrid(const Campaign& c, const vector<pair<Vec2,
           auto lines = WL(getListBuilder, legendLineHeight).addElem(WL(label, *desc));
           if (c.isDefeated(pos))
             lines.addElem(WL(label, TStringId("CAMPAIGN_VILLAIN_DEFEATED")));
-          auto exp = c.getBaseLevelIncrease(Vec2(x, y));
+          auto exp = baseLevelIncreases[Vec2(x, y)];
           if (exp > 0)
             lines.addElem(WL(label, TSentence("CAMPAIGN_VILLAIN_EXP", TString(exp))));
           if (!minions.isEmpty() && !sites[x][y].getDwellingViewId()->contains(ViewId("map_unknown")))

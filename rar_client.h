@@ -28,6 +28,8 @@ void rarSetServerUrl(const std::string& url);
 bool rarUploadCrash(const std::string& name, const std::string& blob);
 // True if a server_url is set (online available, but the player may not be logged in yet).
 bool rarConfigured();
+// Diagnostic: print a per-request connect/TLS/first-byte breakdown to stdout. Used by --rar_net_bench.
+void rarSetTimingVerbose(bool);
 // Set/replace the logged-in credentials (called after the in-game login prompt).
 void rarSetCredentials(const std::string& login, const std::string& password);
 // True if online AND a login is set (i.e. logged in -> save-hash hooks are active).
@@ -165,7 +167,31 @@ bool rarFetchVillain(const std::string& key, std::string& out);
 // Phase B: report that the villain at "x_y" was defeated (leader killed) -> server marks it dead + respawns.
 void rarMarkVillainDefeated(const std::string& key);
 // Upload the post-battle aftermath of a defeated villain (revisitable to loot during the grace period).
-bool rarVillainWriteback(const std::string& key, const std::string& blob);
+// Upload a site's interior AND its loot manifest in ONE request, so the two can never describe different
+// states. baseVersion is optimistic concurrency: pass -1 for "unconditional" (leaving a site), or the version
+// the change was based on (pillaging). Returns false on a version clash and puts the CURRENT version in
+// outVersion, which is the "someone was faster, refresh" case. On success outVersion holds the new version.
+bool rarVillainWriteback(const std::string& key, const std::string& blob, const std::string& lootManifest,
+    const std::string& lootStore, long long baseVersion, long long* outVersion);
+// A site's loot manifest + its version, WITHOUT downloading the interior. A few hundred bytes.
+bool rarFetchVillainLoot(const std::string& key, long long* outVersion, std::string* outManifest);
+// The villains panel asks "does this tile still hold loot" for every site on every refresh, so it must never
+// touch the network. rarRefreshVillainLoot pulls the whole index in one request (call it where the world-map
+// state is already refreshed); rarVillainLootAt answers from that cache.
+void rarRefreshVillainLoot();
+bool rarVillainLootAt(const std::string& key, long long* outVersion);
+// Who holds the pillage right at this site ("" if nobody). Answered from the same cached index.
+// Diagnostic sink for the pillage-takeover path -> rar_takeover.log. Logs only on CHANGE, never per frame.
+void rarTakeoverLog(const std::string& msg);
+std::string rarVillainLootOwner(const std::string& key);
+// Diagnostics: fetch an endpoint verbatim, so a test can print exactly what the server said.
+bool rarHttpGetRaw(const std::string& path, std::string& out, long& code);
+// The loot STORE (serialized items) and its version -- what a pillage reads instead of the interior.
+bool rarFetchVillainLootData(const std::string& key, long long* outVersion, std::string* outData);
+// Replace the store with what is LEFT after a pillage. False on 409 (someone was faster) or 423 (someone is
+// standing in the site); outVersion then holds the version actually on the server.
+bool rarPutVillainLootData(const std::string& key, const std::string& remaining, long long baseVersion,
+    long long* outVersion);
 // Phase B: fetch the currently-dead villain positions ("x_y" per line) so the client hides them from the map.
 bool rarFetchVillainState(std::string& out);
 // World-map sync: refresh the dead-villain overlay from the server (call when opening the world map), then
@@ -200,3 +226,11 @@ void rarSetDataFreeHash(const std::string&);
 // itself. The server overrides GitHub deliberately, so a private server can ship its own rules.
 std::string rarFetchServerDataFreeHash();
 bool rarFetchServerDataFree(std::string& out);
+
+// Opening the world map is the one interaction that visibly stalls the game, and the cost is split across
+// three layers (server fetches, campaign reconcile, building the tile grid). Each records itself here and the
+// whole breakdown is appended to rar_worldmap_timing.txt on close, so a stall can be attributed from a real
+// session instead of guessed at. Cost when nothing stalls: three clock reads.
+void rarTimeStart(const char* label);
+void rarTimeEnd(const char* label);
+void rarTimeFlush(const char* what);

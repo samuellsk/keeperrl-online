@@ -1706,6 +1706,14 @@ void Collective::onAppliedSquare(Creature* c, pair<Position, FurnitureLayer> pos
       if (auto result = furnace->addWork(efficiency * craftingSkill * LastingEffects::getCraftingSpeed(c)))
         returnResource(*result);
     }
+    // A finished item is FORCE-ADDED to the crafter's inventory below -- addItem does not consult the carry
+    // limit the way picking an item up does. Vanilla got away with it because the crafter ran to a storeroom
+    // after EVERY item, so nothing accumulated. Now that it batches them, stop producing once it is nearly
+    // loaded; the drop task (same threshold) then takes the whole batch to storage and it comes back empty.
+    // Stopping here rather than handling an item we cannot carry is deliberate: the alternative -- putting it
+    // on the floor -- destroys it if the crafter is a flier standing over lava or water.
+    if (c->isCarryingFractionOfLimit(craftCarryFraction))
+      return;
     if (auto workshopType = contentFactory->getWorkshopType(furniture->getType()))
       if (auto workshop = getReferenceMaybe(workshops->types, *workshopType)) {
         auto& workshopInfo = contentFactory->workshopInfo.at(*workshopType);

@@ -67,7 +67,10 @@ class MainLoop {
   void rarKeeperLoadTest(const string& gameId); // RAR: --rar_load_dungeon_test -> download+load a dungeon model
   void rarVillainLoadTest(const string& key);   // RAR: --rar_villain_load_test x_y -> why a villain map won't load
   void rarRegenVillains(const string& filter);  // RAR: --rar_regen_villains -> rewrite villain blobs, roster kept
-  void rarNetBench(int reps);                   // RAR: --rar_net_bench -> per-call latency of the world-map fetches
+  // RAR: --rar_net_bench -> per-call latency of the world-map fetches, plus the loot index verbatim. With
+  // --rar_probe_tile=x_y it also enters that site as a fake second keeper, to show whether entry moves the
+  // pillage holder -- the field the takeover notice compares against.
+  void rarNetBench(int reps, const string& probeTile);
   void rarSaveCheck(const string& savePath);    // RAR: --rar_save_check -> find storage positions on a dead level
   void rarLockstepSelfTest(const string& saveFile, int numTurns); // RAR: --rar_lockstep_selftest -> twin-sim determinism check
   void rarLockstepDump(const string& saveFile, int numTurns, int seed, const string& outPath); // one sim -> hash file (fresh-process determinism test)
@@ -92,7 +95,13 @@ class MainLoop {
   // Serialize the current game to a transport blob (raw decompressed bytes), stripping sectors + releasing control
   // first (a clean keeper-mode snapshot) -- the shared lockstep start-state this side contributes.
   string rarPackGameBlob(PGame& game);
-  PModel rarLoadVillainModel(Vec2 pos);          // RAR Phase A: download+load a villain map on demand
+  PModel rarLoadVillainModel(Game*, Vec2 pos);   // RAR Phase A: download+load a villain map on demand
+  PModel rarLoadVillainModelNoSplash(Vec2 pos);  // same, for callers not on the render thread (no splash)
+  // RAR remote pillage: download a site's interior, take the loot its DEFEATED collectives are holding into
+  // the player's storage, and upload the emptied interior + a fresh manifest based on `baseVersion`. Returns
+  // false if somebody got there first (409) or is standing in it (423) -- the caller shows why and refreshes.
+  bool rarPillageRemoteSite(Game* game, Vec2 pos, int colIndex, long long baseVersion, string& outMessage,
+      bool& outFactionEmptied);
   void exportBase(const string& gameId, const string& outFile); // RAR: extract a keeper's base MODEL-ONLY (no settings)
   void importBase(const string& inFile, const string& targetGameId); // RAR: rebuild a playable keeper from a base file
   void rehomeKeeper(const string& gameId, const string& targetGameId); // RAR: swap a full keeper blob onto the current world

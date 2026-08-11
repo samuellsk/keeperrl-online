@@ -27,6 +27,9 @@ class Monster : public Controller {
   Monster(Creature*, const MonsterAIFactory&);
   
   virtual void makeMove() override;
+  // RAR: true when this creature's AI holds a raw pointer to another creature (a summoner) that will not
+  // survive being serialized into a villain blob. See MonsterAI::rarSummonerMissingFrom.
+  bool rarSummonerMissingFrom(const Model* m) const;
   virtual bool isPlayer() const override;
   virtual const MapMemory& getMemory() const;
   virtual MessageGenerator& getMessageGenerator() const override;

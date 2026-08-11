@@ -86,7 +86,7 @@ void Campaign::setDweller(Vec2 pos, SiteInfo::Dweller dweller) {
   sites[pos].dweller = std::move(dweller);
 }
 
-void Campaign::reconcileVillains(const ContentFactory* f, const vector<RarVillain>& roster,
+void Campaign::reconcileVillains(ContentFactory* f, const vector<RarVillain>& roster,
     const vector<VillainGroup>& myGroups, TribeId playerTribe) {
   // TRIBES OVERRULE THE VILLAIN GROUP. A villain group says what ROLE a faction plays on the world map; the
   // tribe graph says who actually fights whom. They are independent, so a group could offer an alliance with a
@@ -163,6 +163,11 @@ void Campaign::reconcileVillains(const ContentFactory* f, const vector<RarVillai
         defeated[p] = rv.defeated;
       }
   }
+  // The roster just moved villains around, so the hover portraits computed for the PREVIOUS occupants are now
+  // wrong: a tile that gained a respawn had no portraits at all (nothing to show on hover -- two sites of the
+  // same faction, one with stats and one without), and a tile whose villain moved away kept the old ones.
+  // Cheap now: one pass over the sites, and the generation itself is cached across calls.
+  updateInhabitants(f);
   refreshInfluencePos(f);
   refreshMaxAggressorCutOff();
 }
@@ -177,25 +182,52 @@ bool Campaign::VillainInfo::isEnemy() const {
   return type != VillainType::ALLY;
 }
 
+// Fills the world map's hover portraits: a faction's leader plus up to three fighters, with their levels.
+//
+// This does not look anything up -- it CONSTRUCTS real creatures (body, attributes, equipment) and then keeps
+// four of them as thumbnails. Done once per inhabited tile that is several hundred full generations per pass,
+// and it ran on every load and every campaign rebuild.
+//
+// The portraits depend only on WHICH faction it is and the tile's difficulty bump, so generate once per
+// (faction, bump) and reuse. Deliberate consequence: two tiles of the same faction at the same difficulty now
+// show the SAME four portraits instead of two independent random rolls. This is a tooltip -- the real garrison
+// is generated inside the villain's own interior, and is untouched by any of this.
+// Portraits survive between calls: the same (faction, difficulty) pairs recur on every reconcile, so after the
+// first pass this is pure lookup -- which is what makes it affordable to refresh them on every world-map open.
+static map<pair<string, int>, vector<SavedGameInfo::MinionInfo>> inhabitantCache;
+
+void Campaign::clearInhabitantCache() {
+  inhabitantCache.clear();
+}
+
 void Campaign::updateInhabitants(ContentFactory* factory) {
+  auto levels = getBaseLevelIncreases();
+  auto& generated = inhabitantCache;
   for (auto pos : sites.getBounds()) {
     auto& site = sites[pos];
     site.inhabitants.clear();
     if (site.dweller)
       site.dweller->match(
           [&](const VillainInfo& info) {
-            auto& inhabitants = factory->enemies.at(info.enemyId).settlement.inhabitants;
-            auto creatures = inhabitants.leader.generate(Random,
-                &factory->getCreatures(), TribeId::getMonster(), MonsterAIFactory::monster());
-            creatures.append(inhabitants.fighters.generate(Random,
-                &factory->getCreatures(), TribeId::getMonster(), MonsterAIFactory::monster()));
-            auto exp = getBaseLevelIncrease(pos);
-            for (auto& c : creatures) {
-              c->setCombatExperience(exp);
-              site.inhabitants.push_back(SavedGameInfo::MinionInfo::get(factory, c.get()));
-              if (site.inhabitants.size() >= 4)
-                break;
+            const auto exp = levels[pos];
+            auto key = make_pair(string(info.enemyId.data()), exp);
+            auto it = generated.find(key);
+            if (it == generated.end()) {
+              vector<SavedGameInfo::MinionInfo> built;
+              auto& inhabitants = factory->enemies.at(info.enemyId).settlement.inhabitants;
+              auto creatures = inhabitants.leader.generate(Random,
+                  &factory->getCreatures(), TribeId::getMonster(), MonsterAIFactory::monster());
+              creatures.append(inhabitants.fighters.generate(Random,
+                  &factory->getCreatures(), TribeId::getMonster(), MonsterAIFactory::monster()));
+              for (auto& c : creatures) {
+                c->setCombatExperience(exp);
+                built.push_back(SavedGameInfo::MinionInfo::get(factory, c.get()));
+                if (built.size() >= 4)
+                  break;
+              }
+              it = generated.emplace(std::move(key), std::move(built)).first;
             }
+            site.inhabitants = it->second;
           },
           [&](const RetiredInfo& info) { site.inhabitants = info.gameInfo.minions ;},
           [&](const KeeperInfo&) { site.inhabitants.clear(); });
@@ -283,6 +315,27 @@ bool Campaign::isInInfluence(Vec2 pos) const {
   return influencePos.count(pos);
 }
 
+// Every tile's difficulty bump at once. getBaseLevelIncrease(pos) re-scans the WHOLE map to count the
+// influence-blocking villains closer to the player than `pos`, which is fine for a one-off question -- but
+// three callers ask it for every tile in a loop, making them O(sites^2). On a ~26,000-tile world that is
+// hundreds of millions of distance computations per pass, and it was the dominant cost of both loading a
+// keeper (two passes, ~11s) and opening the world map (one pass per render).
+//
+// Sorting the blocking distances once turns each tile into a binary search. Identical numbers -- the count of
+// blocking sites strictly closer than this tile -- for one scan instead of one scan per tile.
+Table<int> Campaign::getBaseLevelIncreases() const {
+  vector<double> blocking;
+  for (Vec2 v : sites.getBounds())
+    if (blocksInfluence(sites[v].getVillainType().value_or(VillainType::NONE)))
+      blocking.push_back(v.distD(playerPos));
+  std::sort(blocking.begin(), blocking.end());
+  Table<int> ret(sites.getBounds(), 0);
+  for (Vec2 v : sites.getBounds())
+    ret[v] = (int) (std::lower_bound(blocking.begin(), blocking.end(), v.distD(playerPos)) - blocking.begin())
+        * expIncrease;
+  return ret;
+}
+
 int Campaign::getBaseLevelIncrease(Vec2 pos) const {
   double dist = pos.distD(playerPos);
   int res = 0;
@@ -308,12 +361,13 @@ constexpr int maxAggressorDiff = 10;
 
 void Campaign::refreshMaxAggressorCutOff() {
   belowMaxAgressorCutOff = Table<bool>(sites.getBounds(), false);
+  auto levels = getBaseLevelIncreases();   // one scan instead of two per tile
   auto maxConquered = 0;
   for (Vec2 v : sites.getBounds())
     if (blocksInfluence(sites[v].getVillainType().value_or(VillainType::NONE)) && defeated[v])
-      maxConquered = max(maxConquered, getBaseLevelIncrease(v));
+      maxConquered = max(maxConquered, levels[v]);
   for (Vec2 v : sites.getBounds())
-    belowMaxAgressorCutOff[v] = getBaseLevelIncrease(v) <= maxConquered + maxAggressorDiff;
+    belowMaxAgressorCutOff[v] = levels[v] <= maxConquered + maxAggressorDiff;
 }
 
 void Campaign::refreshInfluencePos(const ContentFactory* f) {

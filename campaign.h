@@ -93,7 +93,9 @@ class Campaign {
   // playerTribe = the keeper's own tribe. TRIBES OVERRULE THE VILLAIN GROUP: an ALLY whose faction tribe is
   // hostile to playerTribe (enemyOfAll without an `allies` entry, or an explicit `enemies` edge) is demoted to
   // an enemy too, so the world map can't offer an alliance the creatures themselves would never honour.
-  void reconcileVillains(const ContentFactory*, const vector<RarVillain>&, const vector<VillainGroup>& myGroups,
+  // Non-const: this now refreshes the hover portraits too (updateInhabitants), because re-placing the roster
+  // is exactly when they go stale.
+  void reconcileVillains(ContentFactory*, const vector<RarVillain>&, const vector<VillainGroup>& myGroups,
       TribeId playerTribe);
   bool canTravelTo(Vec2) const;
   bool isInInfluence(Vec2) const;
@@ -102,9 +104,14 @@ class Campaign {
   int getMinimapZoom() const;
   void setRenderZoom(int mapZoom, int minimapZoom); // offline map-generator: a hand-built Campaign has no zoom set
   int getBaseLevelIncrease(Vec2) const;
+  // Every tile's difficulty bump in ONE pass -- see the definition for why asking per tile is quadratic.
+  Table<int> getBaseLevelIncreases() const;
   bool passesMaxAggressorCutOff(Vec2);
   CampaignType getType() const;
   void updateInhabitants(ContentFactory*);
+  // Drop the cached hover portraits. Must be called whenever the ContentFactory is replaced -- the cache is
+  // keyed by faction id, and a new factory can define that faction differently.
+  static void clearInhabitantCache();
 
   map<string, string> getParameters() const;
 

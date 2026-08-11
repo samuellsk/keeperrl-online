@@ -114,6 +114,9 @@
 #include "unlocks.h"
 #include "storage_positions.h"
 #include "territory.h"
+#include "item.h"
+#include "inventory.h"
+#include "collective_name.h"
 #include "scripted_ui_data.h"
 #include "version.h"
 #include "rar_client.h"
@@ -529,6 +532,7 @@ MainLoop::ExitCondition MainLoop::playGame(PGame game, bool withMusic, bool noAu
   // PlayerControl at creation, and reloads the tileset below from the fresh tilePaths.
   if (reloadDataOnLoad || options->getBoolValue(OptionId::RELOAD_DATA)) {
     *game->getContentFactory() = createContentFactory(false);
+  Campaign::clearInhabitantCache();   // portraits are keyed by faction id; a new factory may redefine them
     // Replacing the ContentFactory only refreshes DEFINITIONS. Anything Game::spawnKeeper COPIED out of the
     // keeper definition at creation is game state living in the save, and a content reload does not reach it --
     // so re-apply those here too, or an edited keeper_creatures.txt silently has no effect on an existing game.
@@ -571,8 +575,14 @@ MainLoop::ExitCondition MainLoop::playGame(PGame game, bool withMusic, bool noAu
   Encyclopedia encyclopedia(game->getContentFactory());
   // RAR Phase A: online, villain models aren't generated at start -- install the on-demand loader that
   // Game::chooseSite calls to download + materialise a villain the first time the player travels there.
-  if (rarEnabled())
-    game->setVillainLoader([this] (Vec2 pos) { return rarLoadVillainModel(pos); });
+  if (rarEnabled()) {
+    // Capture the raw Game*, never a reference to the local PGame -- the lambdas are stored on the Game and
+    // outlive this scope, so a reference here would dangle.
+    Game* gamePtr = game.get();
+    game->setVillainLoader([this, gamePtr] (Vec2 pos) { return rarLoadVillainModel(gamePtr, pos); });
+    game->setVillainPillager([this, gamePtr] (Vec2 pos, int colIndex, long long v, string& msg, bool& empt) {
+        return rarPillageRemoteSite(gamePtr, pos, colIndex, v, msg, empt); });
+  }
   game->initialize(options, highscores, view, fileSharing, &encyclopedia, unlocks, steamAchievements);
   doWithSplash(TStringId("INITIALIZING_GAME"), game->getAllModels().size(),
       [&] (ProgressMeter& meter) {
@@ -1458,12 +1468,47 @@ MainLoop::ExitCondition MainLoop::playGame(PGame game, bool withMusic, bool noAu
         // leisure from base, and takeVillainWriteback won't touch it again (it's now in villainWrittenBack).
         for (Creature* c : m->getAllCreatures())
           c->clearLastCombatIntent();     // drop cross-model Creature* refs before serializing this model's blob
+        // And drop ORPHANED SUMMONS -- a summon whose summoner is not on this model. Nothing carries a summon
+        // when its summoner leaves a tile (companions is a different mechanism and summons are not in it), so
+        // one left behind holds a raw Creature* into another model: saving it fails in getThis(), loading it
+        // dereferences freed memory in isAffected() on the site's first update. Its own AI would kill it on
+        // its next turn anyway once it noticed. A villain's OWN summons, summoner alive and present, are left
+        // alone -- they serialize fine and are part of the site's defences.
+        for (Creature* c : copyOf(m->getAllCreatures()))
+          if (c->rarIsOrphanedSummon(m))
+            c->dieNoReason(Creature::DropType::NOTHING);
         game->resyncModelLocalTime(m);    // so the villain's survivors aren't frozen on a later load
         SavedGameInfo info;
         info.name = wb->enemyId;
         info.progressCount = 1;
         if (!wb->enemyId.empty())
           info.retiredEnemyInfo = SavedGameInfo::RetiredEnemyInfo{ EnemyId(wb->enemyId.c_str()), wb->type };
+        // The loot manifest and store travel WITH the interior, in one upload, so nobody can ever see a
+        // manifest that describes a different state than the map it belongs to. Built here because this is
+        // the last moment the model is in hand; scanning it costs about a millisecond.
+        //
+        // ALL OF THIS RUNS BEFORE THE INTERIOR IS SERIALIZED. buildLootStore removes the items from the
+        // model, and the interior must be written WITHOUT them -- otherwise the loot exists in two places at
+        // once, and revisiting the site re-injects items it already contains, which is an immediate
+        // "!contains(t)" FATAL when the inventory rejects the duplicate.
+        string lootManifest, lootStore;
+        if (auto pc = game->getPlayerControl()) {
+          lootManifest = pc->buildLootManifest(m);
+          // Record which factions we beat BEFORE extracting. buildLootStore genuinely removes the items from
+          // the model now (that is the whole point of the store), so asking afterwards whether a collective
+          // still has loot always answers NO -- nothing was ever marked, and with nothing marked the panel
+          // had no row to show. Order matters here, not the condition.
+          // One entry per defeated faction. The index must match the numbering buildLootManifest uses
+          // (position in getCollectives(), from 1) because that is what the pillage action decodes.
+          int colIndex = 0;
+          for (Collective* c : m->getCollectives()) {
+            ++colIndex;
+            if (c->isConquered() && c->getName() && !pc->getPillagedItems(c).empty())
+              game->rarMarkSiteHasMyLoot(wb->pos, colIndex, c->getName()->full, c->getName()->viewId);
+          }
+          lootStore = pc->buildLootStore(m);   // items themselves, so pillage never needs the interior
+        }
+        // NOW serialize -- the model no longer holds the loot, so the interior and the store are disjoint.
         string raw = serializeModelRaw(wb->model, info, game->getContentFactory());
         // A CONQUERED site stays loaded -- PILLAGE is used from base and needs it (see above). A site that was
         // only visited is released: it is a downloaded copy, keeping it bloats the save with every site ever
@@ -1473,15 +1518,18 @@ MainLoop::ExitCondition MainLoop::playGame(PGame game, bool withMusic, bool noAu
         // it by hand was tried and reverted: a site model is referenced by far more than the player's claims
         // (the game's villain lists hold raw Collective* into it, messages hold Positions, creatures hold
         // combat intent), and freeing it without unwinding all of that just moved the crash.
-        const bool release = !wb->conquered;
+        const bool release = !wb->keepLoaded;
         const Vec2 sitePos = wb->pos;
         wb = none;                        // drop our extra shared_ptr ref first, so the release can free it
         if (release)
           game->releaseSiteModel(sitePos, false /*keep the villain on the world map*/);
-        std::thread([key, raw = std::move(raw)]() {
+        // Compress + upload off the main thread: lzma on a site interior measured 300-480ms, and the player
+        // should not feel that on the way out. -1 = unconditional; leaving a site is not competing with anyone.
+        std::thread([key, raw = std::move(raw), lootManifest = std::move(lootManifest),
+            lootStore = std::move(lootStore)]() {
           string blob = rarLzmaCompress(raw);
           if (!blob.empty())
-            rarVillainWriteback(key, blob);
+            rarVillainWriteback(key, blob, lootManifest, lootStore, -1, nullptr);
         }).detach();
       }
     if (exitCondition)
@@ -2709,7 +2757,7 @@ void MainLoop::rarInvasionLoadTest(const string& gameId) {
 // CPU before anything is optimised. Every rar_client call builds a FRESH curl handle, which means a TCP
 // connect + PSK knock + full TLS handshake per call -- there is no connection reuse -- so the per-call cost is
 // dominated by handshakes, not by the few KB of payload.
-void MainLoop::rarNetBench(int reps) {
+void MainLoop::rarNetBench(int reps, const string& probeTile) {
   if (reps <= 0)
     reps = 5;
   auto timeIt = [&] (const char* label, function<int()> call) {
@@ -2727,9 +2775,51 @@ void MainLoop::rarNetBench(int reps) {
     std::cout.flush();
   };
   std::cout << "[net] " << reps << " reps each, one fresh TLS connection per call\n";
+  rarSetTimingVerbose(true);
   timeIt("/ping         ", [] { return rarServerReachable() ? 1 : 0; });
   timeIt("/claims       ", [] { return (int) rarGetClaims().size(); });
   timeIt("/villain_roster", [] { return (int) rarGetVillainRoster().size(); });
+  // The two calls that stand between clicking PILLAGE and seeing the item list. Timed here so a slow dialog
+  // can be pinned on the network or ruled out of it without a GUI round trip.
+  if (!probeTile.empty()) {
+    timeIt("/villain_loot ", [&] { std::string m; long long v = 0;
+        return rarFetchVillainLoot(probeTile, &v, &m) ? (int) m.size() : -1; });
+    timeIt("/villain_loot_data", [&] { std::string d; long long v = 0;
+        return rarFetchVillainLootData(probeTile, &v, &d) ? (int) d.size() : -1; });
+  }
+  // What the loot index ACTUALLY says, verbatim: tile, version, loot bytes, and WHO holds the pillage right.
+  // The takeover notice compares that last field against our own login, so this shows directly whether the
+  // owner is being reported at all and who it names.
+  {
+    std::string body;
+    long code = 0;
+    if (rarHttpGetRaw("/villain_loot_index", body, code) && code == 200) {
+      std::cout << "[net] /villain_loot_index (tile / version / bytes / holder), our login = '"
+                << rarSessionLogin() << "':\n";
+      if (body.empty())
+        std::cout << "[net]   (empty -- no site currently has loot)\n";
+      for (auto& line : split(body, {'\n'}))
+        if (!line.empty())
+          std::cout << "[net]   " << line << "\n";
+    } else
+      std::cout << "[net] /villain_loot_index FAILED (http " << code << ")\n";
+    // Now do exactly what a SECOND keeper's client does when it walks into a site: GET the interior with its
+    // own login. That is the only thing that is supposed to move the holder. Printing the index again right
+    // after shows whether entry actually rewrites the field the takeover notice reads -- the one link in the
+    // chain that reading the code cannot settle, because both ends look correct in isolation.
+    if (!probeTile.empty()) {
+      std::string blob;
+      long c2 = 0;
+      bool ok = rarHttpGetRaw("/villain/" + probeTile + "?login=rar_bench_probe", blob, c2);
+      std::cout << "[net] probe: entered " << probeTile << " as 'rar_bench_probe' -> http " << c2
+                << " (" << blob.size() << " bytes)\n";
+      if (ok && c2 == 200 && rarHttpGetRaw("/villain_loot_index", body, code) && code == 200)
+        for (auto& line : split(body, {'\n'}))
+          if (!line.empty() && line.substr(0, probeTile.size() + 1) == probeTile + "\t")
+            std::cout << "[net]   after entry: " << line << "\n";
+    }
+    std::cout.flush();
+  }
 }
 
 // Rewrite every villain interior in rar_villains/ with THIS binary's serialization, keeping the roster exactly
@@ -2854,17 +2944,94 @@ void MainLoop::rarVillainLoadTest(const string& key) {
   for (auto alignment : ENUM_ALL(TribeAlignment))
     TribeId::switchForSerialization(getPlayerTribeId(alignment), TribeId::getRetiredKeeper());
   auto _ = OnExit([]{TribeId::clearSwitch();});
+  auto msSince = [](std::chrono::steady_clock::time_point t0) {
+    return (long long) std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+  };
   try {
     RetiredModelInfo info;
+    auto tLoad = std::chrono::steady_clock::now();
     CompressedInput input(tmp.getPath());
     string discard;
     SavedGameInfo discard2;
     int version;
     input.getArchive() >> version >> discard >> discard2;
-    std::cout << "[villain] save_version=" << version << " (this binary writes " << saveVersion << ")\n";
     input.getArchive() >> info;
+    auto loadMs = msSince(tLoad);
+    std::cout << "[villain] save_version=" << version << " (this binary writes " << saveVersion << ")\n";
     std::cout << "[villain] LOADED OK -- alive=" << (info.model ? (int) info.model->getAllCreatures().size() : -1)
-              << "\n";
+              << "  deserialize=" << loadMs << "ms\n";
+    // Can the SERVER cheaply load a villain, change it (remove pillaged items) and write it back? If yes, a
+    // pillage can be applied server-side against the ONE authoritative blob and the save never has to be split
+    // into separate map + loot files. This times every leg of that cycle.
+    if (info.model) {
+      int itemCount = 0;
+      auto tScan = std::chrono::steady_clock::now();
+      for (auto level : info.model->getLevels())
+        for (auto& pos : level->getAllPositions())
+          itemCount += pos.getItems().size();
+      auto scanMs = msSince(tScan);
+      SavedGameInfo si;
+      si.name = "pillagebench";
+      si.progressCount = 1;
+      auto tSer = std::chrono::steady_clock::now();
+      string raw2 = serializeModelRaw(info.model, si, &info.factory);
+      auto serMs = msSince(tSer);
+      auto tLz = std::chrono::steady_clock::now();
+      string lz2 = rarLzmaCompress(raw2);
+      auto lzMs = msSince(tLz);
+      std::cout << "[villain] items on map=" << itemCount << "  scan=" << scanMs << "ms"
+                << "  reserialize=" << serMs << "ms (" << raw2.size() << "b)"
+                << "  lzma=" << lzMs << "ms (" << lz2.size() << "b)\n";
+      std::cout << "[villain] TOTAL server-side load-modify-save = "
+                << (loadMs + scanMs + serMs + lzMs) << "ms\n";
+      // LOOT STORE feasibility: the whole split rests on detached items surviving serialization on their
+      // OWN, away from the model they came from. If they do, pillage never has to re-serialize an interior
+      // -- which is exactly the step that crashes today, because a Summoned behaviour's summoner reference
+      // no longer resolves after a model has been round-tripped once.
+      // Take the loot off the site the same way retrievePillageItems does (Position::removeItem detaches and
+      // hands back ownership), write it out, read it back, and compare.
+      {
+        vector<PItem> loot;
+        vector<string> tookNames;
+        for (auto level : info.model->getLevels())
+          for (auto& pos : level->getAllPositions())
+            for (auto it : copyOf(pos.getInventory().getItems())) {
+              tookNames.push_back(string(it->getViewObject().id().data()));
+              loot.push_back(pos.removeItem(it));
+            }
+        std::cout << "[loot] detached " << loot.size() << " item(s) from the site\n";
+        if (!loot.empty()) {
+          auto tSer2 = std::chrono::steady_clock::now();
+          std::stringstream lootSs;
+          { OutputArchive ar(lootSs); ar << loot; }
+          auto lootBytes = lootSs.str().size();
+          auto serMs2 = msSince(tSer2);
+          vector<PItem> back;
+          bool ok = true;
+          try {
+            std::stringstream in(lootSs.str());
+            InputArchive ar(in);
+            ar >> back;
+          } catch (std::exception& e) {
+            ok = false;
+            std::cout << "[loot] ROUND TRIP FAILED: " << e.what() << "\n";
+          } catch (...) {
+            ok = false;
+            std::cout << "[loot] ROUND TRIP FAILED (unknown)\n";
+          }
+          if (ok) {
+            bool same = back.size() == loot.size();
+            for (int i = 0; same && i < (int) back.size(); ++i)
+              same = back[i] && string(back[i]->getViewObject().id().data()) == tookNames[i];
+            std::cout << "[loot] serialized " << lootBytes << " bytes in " << serMs2 << "ms -> read back "
+                      << back.size() << " item(s): " << (same ? "MATCH -- the split is viable"
+                                                              : "MISMATCH -- items do not survive alone")
+                      << "\n";
+          }
+        }
+      }
+    }
   } catch (std::exception& e) {
     std::cout << "[villain] LOAD FAILED: " << e.what() << "\n";
   } catch (...) {
@@ -4334,7 +4501,83 @@ void MainLoop::runLockstepBattle(const string& defenderSave, const string& invad
 // RAR Phase A: fetch the server's pre-generated villain map for a world position and load it into a live
 // Model (transport: lzma -> raw -> re-gzip -> loadRetiredModelFromFile). Called on demand by Game::chooseSite
 // when the player travels to a villain that wasn't generated at start. Returns null on any failure.
-PModel MainLoop::rarLoadVillainModel(Vec2 pos) {
+// RAR remote pillage. The work happens HERE, on the pillaging client, not on the server: it downloads the
+// site's interior, moves the loot its DEFEATED collectives are holding into this keeper's storage, and uploads
+// the emptied interior together with a fresh manifest. The server only compares an integer and swaps two
+// files -- it never loads a model, so a pillage costs it nothing regardless of how many players are pillaging.
+//
+// baseVersion is the version the loot list was read at. If the site changed in between, the upload is refused
+// and NOTHING has been taken: the items were moved inside a throwaway copy of the interior that we simply
+// drop. That is what makes a lost race harmless rather than duplicating loot.
+bool MainLoop::rarPillageRemoteSite(Game* game, Vec2 pos, int colIndex, long long baseVersion,
+    string& outMessage, bool& outFactionEmptied) {
+  outFactionEmptied = false;
+  const string key = toString(pos.x) + "_" + toString(pos.y);
+  auto pc = game->getPlayerControl();
+  if (!pc) {
+    outMessage = "No keeper to pillage with.";
+    return false;
+  }
+  // The interior is NEVER touched here. Fetching the loot store is a few KB against 200KB compressed /
+  // 12MB raw, there is nothing to deserialize but the items themselves, and -- the reason this exists --
+  // nothing re-serializes a model that has already been round-tripped once, which is what crashed on a
+  // Summoned behaviour whose summoner no longer resolved.
+  string store;
+  long long version = -1;
+  if (!rarFetchVillainLootData(key, &version, &store) || store.empty()) {
+    outMessage = "There is nothing left to take here.";
+    return false;
+  }
+  bool tookAny = false;
+  string remaining = pc->pillageFromStore(store, colIndex, tookAny, outFactionEmptied);
+  if (!tookAny)
+    return true;                 // opened and closed without taking: nothing to upload, nothing to report
+  long long newVersion = -1;
+  if (!rarPutVillainLootData(key, remaining, version, &newVersion)) {
+    // Refused: somebody pillaged first, or is standing in the site. handlePillage drops items into storage
+    // as they are picked, so the haul is already ours -- this is reported, not undone.
+    outMessage = rarLastError().empty() ? "The site changed before your haul was recorded." : rarLastError();
+    return false;
+  }
+  return true;
+}
+
+// Same download as rarLoadVillainModel but WITHOUT the splash (the caller is not on the render thread) and
+// WITHOUT the disk round trip.
+//
+// The normal path writes the decompressed archive to a temp file with ogzstream and immediately reads it back
+// through CompressedInput -- so a ~12MB archive gets gzip-compressed, written, read and gunzipped purely to
+// hand it to a loader that takes a FilePath. That is the bulk of the pause on clicking pillage, and none of
+// it is needed: rarLzmaDecompress already produced exactly the bytes the archive wants, so deserialize
+// straight out of memory. Same TribeId switch as loadRetiredModelFromFile -- a retired site's keeper tribes
+// have to be remapped or its creatures come back on the wrong side.
+PModel MainLoop::rarLoadVillainModelNoSplash(Vec2 pos) {
+  string key = toString(pos.x) + "_" + toString(pos.y);
+  string blob;
+  if (!rarFetchVillain(key, blob) || blob.empty())
+    return nullptr;
+  string raw = rarLzmaDecompress(blob);
+  if (raw.empty())
+    return nullptr;
+  for (auto alignment : ENUM_ALL(TribeAlignment))
+    TribeId::switchForSerialization(getPlayerTribeId(alignment), TribeId::getRetiredKeeper());
+  auto _ = OnExit([]{TribeId::clearSwitch();});
+  try {
+    std::stringstream ss(raw);
+    InputArchive ar(ss);
+    int version;
+    string discard;
+    SavedGameInfo discard2;
+    ar >> version >> discard >> discard2;
+    RetiredModelInfo info;
+    ar >> info;
+    if (info.model)
+      return PModel(std::move(info.model));
+  } catch (...) {}                 // a blob we cannot read is "site unavailable", same as a failed download
+  return nullptr;
+}
+
+PModel MainLoop::rarLoadVillainModel(Game* game, Vec2 pos) {
   string key = toString(pos.x) + "_" + toString(pos.y);
   PModel result;
   doWithSplash(TString("Approaching enemy territory..."_s), [&] {
@@ -4348,8 +4591,18 @@ PModel MainLoop::rarLoadVillainModel(Vec2 pos) {
     { ogzstream out(tmp.getPath()); out.write(raw.data(), raw.size()); }
     auto info = loadRetiredModelFromFile(tmp);
     tmp.erase();
-    if (info && info->model)
+    if (info && info->model) {
+      // The interior no longer carries its loot -- that lives in the store on the server. Put back whatever
+      // is still there, at the positions it stood on, so walking in shows exactly what the pillage list says
+      // is left: taken items are absent, the rest is where it was.
+      if (auto pc = game ? game->getPlayerControl() : nullptr) {
+        string store;
+        long long version = -1;
+        if (rarFetchVillainLootData(key, &version, &store))
+          pc->reinjectLootStore(info->model.get(), store);
+      }
       result = PModel(std::move(info->model));
+    }
   });
   return result;
 }
@@ -5475,12 +5728,13 @@ ModelTable MainLoop::prepareCampaignModels(CampaignSetup& setup, const AvatarInf
   int numSites = setup.campaign.getNumNonEmpty();
   vector<ContentFactory> factories;
   int numRetiredVillains = 0;
+  auto baseLevelIncreases = setup.campaign.getBaseLevelIncreases(); // one pass, not one scan per tile
   doWithSplash(TStringId("GENERATING_MAP"), numSites,
       [&] (ProgressMeter& meter) {
         for (Vec2 v : sites.getBounds()) {
           if (!sites[v].isEmpty())
             meter.addProgress();
-          int difficulty = setup.campaign.getBaseLevelIncrease(v);
+          int difficulty = baseLevelIncreases[v];
           if (auto info = sites[v].getKeeper()) {
             models[v] = getBaseModel(modelBuilder, setup, avatarInfo);
           } else if (auto villain = sites[v].getVillain()) {
@@ -5593,6 +5847,16 @@ void MainLoop::rarUploadPendingCrashesNow() {
 void MainLoop::rarSyncWorldOnLoad(PGame& game) {
   if (!rarEnabled() || !game)
     return;
+  // Sub-phase timing -- this whole function measured 14.8s of a 15.1s load, and it does four heavy things
+  // (fetch+deserialize the world, rebuild the ContentFactory, rebuild the campaign grid, reconcile villains)
+  // with no way from outside to tell which. See the phase timer in loadGame.
+  auto t0 = std::chrono::steady_clock::now();
+  auto phase = [&t0] (const char* what) {
+    auto now = std::chrono::steady_clock::now();
+    auto ms = (int) std::chrono::duration<double, std::milli>(now - t0).count();
+    t0 = now;
+    rarTakeoverLog(string("  sync: ") + what + " " + toString(ms) + " ms");
+  };
   Model* base = game->getMainModel().get();
   auto pcol = game->getPlayerCollective();
   if (!base || !pcol || pcol->getLeaders().empty())
@@ -5639,8 +5903,10 @@ void MainLoop::rarSyncWorldOnLoad(PGame& game) {
     view->presentText(none, TString("Couldn't sync the world map from the server; using the last known map."_s));
     return;
   }
+  phase("fetch + deserialize world blob");
   string worldName = "RAR World";
   { auto w = rarGetWorld(); if (w.valid && !w.worldName.empty()) worldName = w.worldName; }
+  phase("/world name");
   // CONTENT is server-owned too: Game::serialize freezes a whole ContentFactory into every save, so a keeper
   // created before a new biome/villain existed carries a snapshot that can't describe the server's CURRENT
   // world -- and Campaign::updateInhabitants does factory->enemies.at(enemyId), which THROWS on an unknown id.
@@ -5653,6 +5919,7 @@ void MainLoop::rarSyncWorldOnLoad(PGame& game) {
     for (auto& p : f->keeperCreatures)
       if (p.first == game->getAvatarId()) { pc->reloadBuildMenu(f, p.second); break; }
   }
+  phase("rebuild ContentFactory + build menu");
   Vec2 oldPos = base->position;
   Creature* keeper = pcol->getLeaders()[0];
   // RAR: a keeper can end up with NO claim on the server -- the startup stray-prune drops any claim that never
@@ -5671,6 +5938,7 @@ void MainLoop::rarSyncWorldOnLoad(PGame& game) {
     else
       claimedByOthers.push_back(Vec2(c.x, c.y));
   }
+  phase("fetch claims");
   RandomGen rnd;
   rnd.init((int) time(nullptr));
   auto camp = CampaignBuilder::reconstructKeeperCampaign(rnd, game->getContentFactory(), std::move(sites),
@@ -5684,14 +5952,17 @@ void MainLoop::rarSyncWorldOnLoad(PGame& game) {
         TString(string(base->getBiomeId().data()))));
     return;
   }
+  phase("reconstructKeeperCampaign");
   Vec2 newPos = camp->getPlayerPos();
   game->rehomeToNewWorld(std::move(*camp), newPos);
+  phase("rehomeToNewWorld");
   // The campaign we just rebuilt came from the server's RAW world blob, so every villain still carries the
   // type the world was generated with -- notably ALLY for factions that are an ally to SOMEONE. Reconcile it
   // for THIS keeper now. Until this ran, the only thing that reconciled after a load was opening the travel
   // map (Game::chooseSite), so a freshly loaded game showed other keepers' allies as our green "ally" in the
   // villages panel, and the villain-wave code saw ALLY where the world map (once opened) showed MINOR.
   game->reconcileVillainsForLoad();
+  phase("reconcileVillainsForLoad");
   // Claim was missing -> take the tile back now that the base is settled on it. reconstructKeeperCampaign
   // prefers our old tile and only moves us when it is gone, so this usually re-claims exactly where we were.
   if (!haveClaim) {
@@ -5721,6 +5992,17 @@ void MainLoop::rarSyncWorldOnLoad(PGame& game) {
 }
 
 PGame MainLoop::loadGame(const FilePath& file, const TString& name) {
+  // Phase timing for the load, into rar_takeover.log. Loading a keeper is a CHAIN of blocking server calls
+  // (siege check, conquest check, dungeon-hash compare, then the world sync's own hash + roster fetches) with
+  // the save deserialize at the end, and from the outside it is one long freeze with no way to tell which step
+  // owns it. Cheap enough to leave in: a handful of lines per load.
+  auto loadT0 = std::chrono::steady_clock::now();
+  auto phase = [&loadT0] (const char* what) {
+    auto now = std::chrono::steady_clock::now();
+    auto ms = (int) std::chrono::duration<double, std::milli>(now - loadT0).count();
+    loadT0 = now;
+    rarTakeoverLog(string("load: ") + what + " " + toString(ms) + " ms");
+  };
   // Declared out here (not inside the rarEnabled() block below) because the recovery upload happens at the
   // very END of this function, once the game is actually loaded and world-synced.
   bool restoreBlobFromAutosave = false;
@@ -5757,6 +6039,7 @@ PGame MainLoop::loadGame(const FilePath& file, const TString& name) {
       }
       // Unreachable -> fall through and let the owner in: better than locking him out of his own keep.
     }
+    phase("siege check");
     bool useServer = false, wasInvaded = false;
     // Only ever one save on disk (eraseAllSavesExcept), so a .aut existing AT ALL means the last session
     // never exited cleanly -- i.e. we crashed. That is the whole crash signal; nothing else is needed.
@@ -5803,6 +6086,7 @@ PGame MainLoop::loadGame(const FilePath& file, const TString& name) {
         // exit. Our clean local save is all that's left, so put it back after loading.
         restoreBlobFromAutosave = true;
     });
+    phase("keep check (conquest + dungeon hash)");
     if (!slayer.empty()) {
       // The keeper's leader was slain -> refuse to load; tell the owner who did it, then remove the
       // dead keeper (local save + world-map claim) so it's gone for good. Flag it so the caller doesn't
@@ -5837,7 +6121,9 @@ PGame MainLoop::loadGame(const FilePath& file, const TString& name) {
     return nullptr;
   if (rarEnabled())
     (*game)->setGameIdentifier(gameId); // adopt the runtime "<account>~<keeper>" identity (migrated saves self-heal)
+  phase("deserialize save");
   rarSyncWorldOnLoad(*game); // the save's frozen world map is discarded for the server's current one
+  phase("world sync");
   // Crash recovery: the server's copy of our dungeon is missing or older than what we just loaded. Push the
   // local save up verbatim -- it is already in the stripped form (both .kep and .aut are written that way), so
   // the blob is identical in shape to the one a save & exit produces, and the dungeon hash now matches our
@@ -6378,9 +6664,9 @@ void MainLoop::rarSaveCheck(const string& savePath) {
   // Releasing by hand instead of through this path is what shipped broken twice.
   while (auto wb = game->takeVillainWriteback()) {
     const Vec2 sitePos = wb->pos;
-    const bool conq = wb->conquered;
-    std::cout << "[savecheck] writeback for site at " << sitePos << " conquered=" << (conq ? "yes" : "no")
-              << " -> " << (conq ? "kept loaded (pillage)" : "RELEASING") << "\n";
+    const bool conq = wb->keepLoaded;
+    std::cout << "[savecheck] writeback for site at " << sitePos << " keepLoaded=" << (conq ? "yes" : "no")
+              << " -> " << (conq ? "KEPT (conquered or pillageable)" : "RELEASING") << "\n";
     wb = none;
     if (!conq) {
       game->releaseSiteModel(sitePos, false);

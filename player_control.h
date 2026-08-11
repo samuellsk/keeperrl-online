@@ -227,7 +227,31 @@ class PlayerControl : public CreatureView, public CollectiveControl, public Even
   // FIRST return (before it's destroyed), instead of forcing a re-visit. getPillagedItems is the FRESH
   // (non-cached) loot check the invasion path uses instead of the cache-prone VillageControl::canPillage.
   vector<Item*> getPillagedItems(Collective*) const;
+  // RAR pillage: what a pillage of THIS site would actually hand over, as a small text manifest -- one line
+  // per defeated collective and item stack. Built from getPillagedItems so it can never describe loot the
+  // real pillage wouldn't give. Cheap (a full item scan measured ~1ms), so the client that has the model
+  // loaded emits it on the way out; everyone else downloads a few hundred bytes instead of a 200KB interior
+  // just to answer "is there anything here worth coming back for".
+  //   <collectiveIndex>	<levelIndex>	<x>	<y>	<count>	<item>
+  string buildLootManifest(Model*) const;
+  // The loot STORE: the same items the manifest lists, serialized as real items plus the position each came
+  // from, so a pillaging client can be handed an item without ever downloading the 12MB interior, and a
+  // revisiting one can have the remainder put back exactly where it was.
+  // Built by DETACHING the items and then putting them back, so the interior is left untouched -- extraction
+  // is only safe here, on a live model that has never been round-tripped.
+  string buildLootStore(Model*);
+  // Pillage straight out of a loot STORE (serialized items + where they stood) instead of a live Collective.
+  // Shows the SAME dialog handlePillage does -- greyed rows for storage you lack, take one or take all --
+  // because it is the same code path; only where the items come from differs.
+  // Returns the store with the taken items removed, and sets `tookAny`.
+  string pillageFromStore(const string& storeData, int colIndex, bool& tookAny, bool& emptied);
+  // Put a store's remaining items back where they stood. Used when revisiting a site whose loot lives on the
+  // server rather than in the interior.
+  void reinjectLootStore(Model*, const string& storeData);
   void handlePillage(Collective* enemy);
+  // Detach the pillaged items from the site so they can be dropped into our own storage. Public because the
+  // REMOTE pillage runs it against a downloaded interior, not the live one the panel works with.
+  vector<PItem> retrievePillageItems(Collective*, vector<Item*> items);
   private:
   ViewObject getTrapObject(FurnitureType, bool built) const;
   void getSquareViewIndex(Position, bool canSee, ViewIndex&) const;
@@ -291,7 +315,6 @@ class PlayerControl : public CreatureView, public CollectiveControl, public Even
   optional<LocalTime> lastWarningDismiss;
   set<pair<UniqueEntity<Collective>::Id, TStringId>> SERIAL(dismissedVillageInfos);
   void considerTransferingLostMinions();
-  vector<PItem> retrievePillageItems(Collective*, vector<Item*> items);
   TribeAlignment SERIAL(tribeAlignment);
   vector<BuildInfo> SERIAL(buildInfo);
   void loadBuildingMenu(const ContentFactory*, const KeeperCreatureInfo&);
