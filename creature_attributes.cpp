@@ -80,6 +80,11 @@ void CreatureAttributes::serializeImpl(Archive& ar, const unsigned int version) 
     ar(OPTION(copulationEffect));
     ar(OPTION(copulationClientEffect));
   }
+  // Version 3. Deliberately a NEW block: the lines above are the binary layout written into every save and
+  // every pre-generated villain blob, so appending there would change the format and orphan all of them.
+  // The pretty archive passes version 1000, so creatures.txt reads this regardless.
+  if (version >= 3)
+    ar(OPTION(krakenTendril), OPTION(liquidViewId));
   for (auto& a : attr)
     a.second = max(0, a.second);
 }

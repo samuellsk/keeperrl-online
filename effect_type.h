@@ -120,6 +120,21 @@ struct SummonInvasion {
   // instance value (Furniture::tickType is a SERIAL member), so it saves and reloads with the furniture that
   // owns it. Never read from content .txt.
   mutable vector<Creature*> SERIAL(summoned);
+  // Spawners sharing a GROUP name share one wave between them. Furniture ticks per TILE and this effect's
+  // live state belongs to the furniture instance, so a 10-tile lava pool is otherwise 10 independent
+  // summoners, each sending and re-sending its own wave. With a group set, whichever tile ticks first sends
+  // the wave and every other tile in the group -- across the whole level, not just that pool -- sees it
+  // standing and holds off until it is dead.
+  //
+  // Unset = the old per-tile behaviour, so nothing that omits it changes.
+  optional<string> SERIAL(group);
+  // Minimum quiet time between waves, counted from the moment the LAST wave is found dead -- not from when it
+  // was summoned. Distinct from `ttl`, which is how long each summoned creature lives. Unset = the next wave
+  // may come as soon as the previous one falls.
+  optional<int> SERIAL(waveInterval);
+  // When the next wave may be sent. Live state, like `summoned`: per furniture instance when there is no
+  // group, and mirrored in the shared group entry when there is.
+  mutable optional<GlobalTime> SERIAL(nextWave);
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version);
 };
@@ -208,6 +223,16 @@ struct GenericModifierEffect {
 struct Area : GenericModifierEffect {
   Area() {}
   Area(int r, Effect e) : GenericModifierEffect{std::move(e)}, radius(r) {}
+  int SERIAL(radius);
+  SERIALIZE_ALL(radius, SUBCLASS(GenericModifierEffect))
+};
+// Like Area, but the affected tiles form a CIRCLE rather than a square box. Area walks a centred Rectangle,
+// so `Area 5` reaches a corner tile 7 squares away (5,5) as readily as one 5 straight ahead -- fine for a
+// blast that fills a room, wrong for anything meant to look like an expanding ring. Same radius, same effect,
+// measured by real distance.
+struct CircularArea : GenericModifierEffect {
+  CircularArea() {}
+  CircularArea(int r, Effect e) : GenericModifierEffect{std::move(e)}, radius(r) {}
   int SERIAL(radius);
   SERIALIZE_ALL(radius, SUBCLASS(GenericModifierEffect))
 };
@@ -360,6 +385,18 @@ struct ReturnFalse : GenericModifierEffect {
 };
 using SetMinionActivity = MinionActivity;
 using AddMinionTrait = MinionTrait;
+// Like AddMinionTrait, but ONLY when the creature is in the PLAYER's collective.
+//
+// AddMinionTrait resolves "the collective" as the first one in the game that contains the creature, which for
+// anything spawned as part of a settlement is that settlement's own collective -- even when it shares the
+// player's tribe. A creature granting itself a trait that way writes it into a collective the player does not
+// own, and a MinionTrait predicate checking the same creature agrees, so a self-removing ability fires and
+// deletes itself while the player never gets the trait. This variant simply does nothing until the creature
+// has actually been recruited, so such an ability stays armed until then.
+struct AddMinionTraitPlayer {
+  MinionTrait SERIAL(trait);
+  SERIALIZE_ALL(trait)
+};
 struct RemoveMinionTrait {
   MinionTrait SERIAL(trait);
   SERIALIZE_ALL(trait)
@@ -575,7 +612,9 @@ SIMPLE_EFFECT(SummonMinions);
   X(AnimateFurniture, 106)\
   X(SummonInvasion, 107)\
   X(RevealAndClaimTile, 108)\
-  X(ClaimWalls, 109)
+  X(ClaimWalls, 109)\
+  X(CircularArea, 110)\
+  X(AddMinionTraitPlayer, 111)
 
 #define VARIANT_TYPES_LIST EFFECT_TYPES_LIST
 #define VARIANT_NAME EffectType
@@ -596,3 +635,6 @@ class EffectType : public Effects::EffectType {
 };
 
 CEREAL_CLASS_VERSION(Effects::Summon, 1)
+// Version 1 = carries a group name. Furniture instances holding this effect live in saves and in every
+// pre-generated villain blob, so the field must be read behind a version check rather than appended.
+CEREAL_CLASS_VERSION(Effects::SummonInvasion, 1)

@@ -7,6 +7,7 @@
 #include "content_factory.h"
 #include "game.h"
 #include "collective.h"
+#include "rar_client.h"   // rarTakeoverLog: diagnostic sink for the hostile-dig check
 
 SERIALIZE_DEF(DestroyAction, type)
 SERIALIZATION_CONSTRUCTOR_IMPL(DestroyAction)
@@ -117,6 +118,17 @@ bool DestroyAction::canNavigate(const Creature* c) const {
         auto it = tribes.find(c->getTribeId());
         if (it != tribes.end() && it->second.keeperTribe)
           return false;
+        // DIAGNOSTIC: this creature is about to be allowed to tunnel through walls for pathing. Log the tribe
+        // ONCE per tribe -- if a keeper's minions turn up here, either that tribe is missing keeperTribe in
+        // tribes.txt or it is referenced without ever being defined (find() fails, and an undefined tribe has
+        // no flag to read).
+        static set<string> logged;
+        auto name = string(c->getTribeId().data());
+        if (!logged.count(name)) {
+          logged.insert(name);
+          rarTakeoverLog("hostile-dig ALLOWED for tribe '" + name + "' (tribe "
+              + (it != tribes.end() ? "is defined, keeperTribe=false" : "is NOT DEFINED in any tribes.txt") + ")");
+        }
       }
       return true;
     }

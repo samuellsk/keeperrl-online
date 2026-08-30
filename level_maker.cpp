@@ -2525,7 +2525,8 @@ namespace {
     public:
     MapLayoutMaker(const MapLayouts::Layout& layout, const BuildingInfo& info, vector<StairKey> downStairs,
         vector<StairKey> upStairs, TribeId tribe)
-        : layout(layout), buildingInfo(info), tribe(tribe), downStairs(std::move(downStairs)), upStairs(std::move(upStairs)) {}
+        : layout(layout), buildingInfo(info), tribe(tribe), downStairs(std::move(downStairs)),
+          upStairs(std::move(upStairs)) {}
 
     virtual void make(LevelBuilder* builder, Rectangle area) override {
       CHECK(area.getSize() == layout.getBounds().getSize());
@@ -2640,8 +2641,8 @@ namespace {
   class RandomLayoutMaker : public LevelMaker {
     public:
     RandomLayoutMaker(const LayoutGenerator& generator, const RandomLayoutId& id, const LayoutMapping& mapping,
-        const SettlementInfo& info, int difficulty)
-      : id(id), mapping(mapping), generator(generator),
+        const SettlementInfo& info, int difficulty, optional<TribeId> keeperTribe)
+      : id(id), mapping(mapping), generator(generator), keeperTribe(keeperTribe),
         tribe(info.tribe), outsideFurniture(info.outsideFeatures), furniture(info.furniture),
         stockpile(info.stockpiles), shopInfo(info.shopItems), difficulty(difficulty) {
       for (int i : All(info.downStairs).reverse())
@@ -2718,7 +2719,37 @@ namespace {
                     builder->toGlobalCoordinates(Rectangle::centered(pos, 4)).getAllSquares())));
           },
           [&](LayoutActions::AlliedPrisoner info) {
-            auto c = builder->getContentFactory()->getCreatures().fromIdNoInventory(info.id, TribeId::getDarkKeeper(),
+            // The payload names EITHER a creature or a layout group (layout_groups.txt). A group answers
+            // differently per keeper tribe, which is the whole point: `AlliedPrisoner "ELF_ARCHER"` used to
+            // hand a necromancer an elf archer, because the token resolved to one fixed creature for everyone.
+            auto id = info.id;
+            auto& groups = builder->getContentFactory()->layoutGroups;
+            if (auto group = getReferenceMaybe(groups, string(id.data()))) {
+              const vector<CreatureId>* pool = nullptr;
+              for (auto& entry : *group)          // an exact tribe match wins
+                if (entry.tribe && keeperTribe && *entry.tribe == *keeperTribe && !entry.creatures.empty()) {
+                  pool = &entry.creatures;
+                  break;
+                }
+              if (!pool)
+                for (auto& entry : *group)        // ...otherwise the entry with no tribe is the catch-all
+                  if (!entry.tribe && !entry.creatures.empty()) {
+                    pool = &entry.creatures;
+                    break;
+                  }
+              if (!pool) {
+                // No pool for this keeper and no default. Leave the tile empty rather than guessing a creature
+                // that may be absurd for this keeper -- an empty cell is a content gap, a wrong ally is a bug
+                // the player has to live with.
+                INFO << "Layout group " << id.data() << " has no creatures for this keeper tribe and no default";
+                return;
+              }
+              id = (*pool)[builder->getRandom().get(pool->size())];
+            }
+            // Allied to the PLAYER, so it belongs to the player's tribe. This was hardcoded to the dark keeper,
+            // which meant a white keeper freed a "friendly" prisoner that was not actually theirs.
+            auto c = builder->getContentFactory()->getCreatures().fromIdNoInventory(id,
+                keeperTribe.value_or(TribeId::getDarkKeeper()),
                 MonsterAIFactory::stayInLocation(
                     builder->toGlobalCoordinates(Rectangle::centered(pos, 4)).getAllSquares()));
             c->getStatus().insert(CreatureStatus::PRISONER);
@@ -2787,6 +2818,10 @@ namespace {
     const RandomLayoutId id;
     const LayoutMapping& mapping;
     const LayoutGenerator& generator;
+    // The PLAYER's keeper tribe, when this map is generated for a known keeper (z-levels, which pass it down
+    // from the player's collective). Absent where no keeper is involved -- a pre-generated villain interior --
+    // and a tribe-dependent layout group then falls back to its default entry.
+    optional<TribeId> keeperTribe;
     vector<optional<StairKey>> downStairs;
     vector<optional<StairKey>> upStairs;
     TribeId tribe;
@@ -2799,22 +2834,24 @@ namespace {
 }
 
 static PMakerQueue makeRandomLayout(const LayoutGenerator& generator, const RandomLayoutId& id,
-    const LayoutMapping& mapping, const SettlementInfo& info, int difficulty) {
+    const LayoutMapping& mapping, const SettlementInfo& info, int difficulty, optional<TribeId> keeperTribe) {
   auto queue = make_unique<MakerQueue>();
   queue->addMaker(make_unique<MakerQueue>(
       make_unique<AddAttrib>(SquareAttrib::NO_DIG),
-      make_unique<RandomLayoutMaker>(generator, id, mapping, info, difficulty)));
+      make_unique<RandomLayoutMaker>(generator, id, mapping, info, difficulty, keeperTribe)));
   queue->addMaker(make_unique<PlaceCollective>(info.collective, Predicate::attrib(SquareAttrib::EMPTY_ROOM)));
   queue->addMaker(make_unique<Inhabitants>(info.inhabitants, info.collective, Predicate::attrib(SquareAttrib::EMPTY_ROOM)));
   return queue;
 }
 
+// keeperTribe: the PLAYER's tribe when this settlement is generated for a known keeper (z-levels). Only the
+// random-layout path uses it, to resolve tribe-dependent layout groups; everything else ignores it.
 static PMakerQueue getSettlementMaker(const ContentFactory& contentFactory, RandomGen& random,
-    const SettlementInfo& settlement, int difficulty) {
+    const SettlementInfo& settlement, int difficulty, optional<TribeId> keeperTribe = none) {
   return settlement.type.visit(
       [&] (const MapLayoutTypes::RandomLayout& info) {
         return makeRandomLayout(contentFactory.randomLayouts.at(info.id), info.id,
-            contentFactory.layoutMapping.at(info.mapping), settlement, difficulty);
+            contentFactory.layoutMapping.at(info.mapping), settlement, difficulty, keeperTribe);
       },
       [&] (const MapLayoutTypes::Predefined& info) {
         return makeMapLayout(contentFactory.mapLayouts.getRandomLayout(info.id, random), settlement, info.buildingInfo);
@@ -2938,7 +2975,8 @@ PLevelMaker LevelMaker::topLevel(RandomGen& random, vector<SettlementInfo> settl
                 layout,
                 contentFactory.layoutMapping.at(crops.info.layout.mapping),
                 crops.settlement,
-                difficulty),
+                difficulty,
+                none),   // village crops: no keeper involved, so groups take their default entry
             make_unique<PlaceCollective>(crops.settlement.collective)),
           crops.info.layout.size.get(random),
           lowlandPred);
@@ -3042,7 +3080,8 @@ PLevelMaker LevelMaker::settlementLevel(const ContentFactory& factory, RandomGen
   queue->addMaker(make_unique<Empty>(SquareChange(FurnitureType("FLOOR")).add(mountainType)
       .add(SquareAttrib::NO_RESOURCES)));
   auto locations = make_unique<RandomLocations>();
-  auto maker = getSettlementMaker(factory, random, settlement, difficulty);
+  // resourceTribe is the PLAYER's keeper tribe on the z-level path (zlevel.cpp passes it straight through).
+  auto maker = getSettlementMaker(factory, random, settlement, difficulty, resourceTribe);
   // Due to backward compatibility with mods, don't clear the mountain under a predefined layout
   if (!settlement.type.contains<MapLayoutTypes::Predefined>())
     maker = make_unique<MakerQueue>(make_unique<Empty>(SquareChange::reset(FurnitureType("FLOOR"))), std::move(maker));
@@ -3067,7 +3106,9 @@ PLevelMaker LevelMaker::getFullZLevel(RandomGen& random, optional<SettlementInfo
   auto locations = make_unique<RandomLocations>();
   vector<SurroundWithResourcesInfo> surroundWithResources;
   if (settlement) {
-    auto maker = getSettlementMaker(factory, random, *settlement, difficulty);
+    // keeperTribe is the PLAYER's tribe here (furniture_on_built passes getPlayerCollective()->getTribeId()),
+    // which is what a tribe-dependent layout group needs to answer with.
+    auto maker = getSettlementMaker(factory, random, *settlement, difficulty, keeperTribe);
     maker->addMaker(make_unique<RandomLocations>());
     if (settlement->corpses)
       maker->addMaker(make_unique<Corpses>(*settlement->corpses));

@@ -82,3 +82,8 @@
 "gnome_corpse" % white
 "automaton_parts" ( brown
 "trap" ^ gray
+"underground_magma" ~ red
+"lava_pool" O red
+"enchanted_water" ~ magenta
+"enchanted_workshop" W magenta
+"enchanted_lab" L magenta

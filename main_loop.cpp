@@ -555,6 +555,21 @@ MainLoop::ExitCondition MainLoop::playGame(PGame game, bool withMusic, bool noAu
           break;
         }
     }
+    // LEARNED SPELLS. A creature stores a full COPY of each spell it knows (SpellMap::SpellInfo), so an edited
+    // spells.txt otherwise only reaches creatures spawned afterwards -- anything already in the dungeon keeps
+    // casting the version it learned. Re-read the definitions here; cooldowns and levels are runtime state and
+    // are preserved, and a spell that no longer exists in the files is left alone rather than removed.
+    {
+      auto& creatureFactory = game->getContentFactory()->getCreatures();
+      int casters = 0, spells = 0;
+      for (auto model : game->getAllModels())
+        for (Creature* c : model->getAllCreatures())
+          if (int n = c->getSpellMap().refreshFromFactory(creatureFactory)) {
+            ++casters;
+            spells += n;
+          }
+      std::cout << "[reload_data] refreshed " << spells << " learned spell(s) on " << casters << " creature(s)\n";
+    }
     std::cout << "[reload_data] reloaded data files into the game on load\n"; std::cout.flush();
   }
   if (tileSet) {
@@ -4636,10 +4651,48 @@ void MainLoop::modSyncSelfTest(const string& modName) {
   std::cout.flush();
 }
 
+// Bring data_free (the RULE files: game_config + ui) into line with the server we are actually connected to.
+//
+// The server publishes its own bundle and its hash, and the client already knew how to fetch both -- but
+// nothing ever called them, so the only thing enforcing data_free was keeper_updater, which repairs against a
+// GitHub URL pinned in appconfig. That is the wrong authority: it reverts edits to whatever some past commit
+// held, regardless of which server you are playing on, which is why a local test server's config never stuck.
+//
+// This uses the ordinary client transport, so it automatically follows the SAME server the game connects to:
+// the address the server list resolved to, or appconfig's server_url when there is no list (localhost for a
+// local test server). Hash first -- an already-matching client downloads nothing and triggers no reload.
+void MainLoop::syncServerDataFree() {
+  auto serverHash = rarFetchServerDataFreeHash();
+  if (serverHash.empty())
+    return;               // server publishes none (older server) -> no opinion, leave our content alone
+  const auto path = dataFreePath.getPath();
+  if (rarHashDataFree(path) == serverHash)
+    return;               // already identical -> nothing to download, nothing to reload
+  string bundle;
+  bool ok = false;
+  doWithSplash(TString("Syncing game rules with the server..."_s), 1,
+      [&] (ProgressMeter&) { ok = rarFetchServerDataFree(bundle); });
+  if (!ok || bundle.empty()) {
+    // Not fatal: play on the rules we have rather than refusing to start. The server still sees the mismatch
+    // at login and can act on it.
+    INFO << "RAR: could not download data_free from the server: " << rarLastError();
+    return;
+  }
+  if (!rarUnbundleDataFree(path, bundle)) {
+    INFO << "RAR: data_free bundle from the server could not be unpacked";
+    return;
+  }
+  // Report the CORRECTED hash on subsequent logins, and force the content + tileset reload below.
+  rarSetDataFreeHash(rarHashDataFree(path));
+  modsChangedThisSync = true;
+}
+
 bool MainLoop::syncServerMods() {
   modsChangedThisSync = false;
   if (!rarEnabled())
     return true;
+  // Rules first, then mods: both feed the single content reload that syncServerMods' caller performs.
+  syncServerDataFree();
   std::vector<std::pair<std::string, std::string>> manifest;
   if (!rarFetchModManifest(manifest))
     return true; // server has no /mods (older server) -> nothing required, proceed

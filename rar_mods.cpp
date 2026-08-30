@@ -123,6 +123,28 @@ string rarBundleDataFree(const string& dataFreePath) {
   return ss.str();
 }
 
+// "relpath<TAB>sha256" per protected file, over exactly the same set the bundle covers. This is what
+// keeper_updater verifies against BEFORE the game starts, so it must never drift from rarBundleDataFree --
+// hence it walks the same folders through the same collector.
+string rarDataFreeManifest(const string& dataFreePath) {
+  DirectoryPath root(dataFreePath);
+  if (!root.exists())
+    return "";
+  vector<pair<string, string>> files;
+  for (auto& sub : {"game_config", "ui"}) {
+    auto dir = root.subdirectory(sub);
+    if (dir.exists())
+      collectModFiles(dir, string(sub) + "/", files);
+  }
+  std::sort(files.begin(), files.end());
+  string out;
+  for (auto& f : files)
+    // "path<TAB>sha<TAB>size", and the path is relative to the GAME FOLDER (data_free/...), because that is
+    // where keeper_updater writes a repaired file. Three fields because that is the format its parser wants.
+    out += "data_free/" + f.first + "\t" + rarSha256Hex(f.second) + "\t" + toString(f.second.size()) + "\n";
+  return out;
+}
+
 // Hash IS the hash of the bundle, deliberately: whatever a client downloads is exactly what it verifies, so
 // the two can never drift apart the way a separately-computed digest could.
 std::string rarHashDataFree(const string& dataFreePath) {

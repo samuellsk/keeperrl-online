@@ -76,7 +76,7 @@
   "prison" Place "PRISON"
   "ant_worker" HostileCreature "ANT_WORKER"
   "bat" PeacefulCreature "BAT"
-  "elf_archer" AlliedPrisoner "ELF_ARCHER"
+  "zlevel_ally" AlliedPrisoner "ALLY_ZLEVEL_GROUP"
   "ghost_spawn" Place "GHOST_SPAWN"
   "gargoyle" Place "GARGOYLE_TRAP"
   "workshop" Place "WORKSHOP"

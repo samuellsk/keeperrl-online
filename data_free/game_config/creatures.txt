@@ -4053,15 +4053,21 @@ End
     body = {
       type = NonHumanoid SMALL
       bodyParts = {
+        HEAD 1
         LEG 6
         WING 2
         TORSO 1
+      }
+      intrinsicAttacks = {
+        HEAD {{{ Intrinsic { "bite_attack" } FANGS_ATTACK 1 {
+            attackType = BITE
+            attackMsg = BITE
+        } }}}
       }
       weight = 0.1
       deathSound = none
       canBeRevived = false
     }
-    aiType = RANGED
     noChase = true
     name = {
       name = CREATURE_ATTRIBUTES_FLY_NAME
@@ -4082,6 +4088,12 @@ End
         LEG 6
         HEAD 1
         TORSO 1
+      }
+      intrinsicAttacks = {
+        HEAD {{{ Intrinsic { "bite_attack" } FANGS_ATTACK 1 {
+            attackType = BITE
+            attackMsg = BITE
+            victimEffect = {0.1 Lasting POISON} } }}}
       }
       deathSound = none
     }
@@ -5655,5 +5667,67 @@ End
     hatedByEffect = HATE_GREENSKINS
     inventory = {
       { "HeavyClub"}
+    }
+  }
+
+# The kraken and its tentacles. These were built in C++ (CreatureFactory::getKrakenAttributes) and could not
+# be seen, edited or copied from content -- the id, sprite, name and stats below are exactly what that code
+# produced. Only the BEHAVIOUR stays in code (KrakenController: growing tentacles toward a victim, pulling it
+# in, dying with the head); `krakenTendril` is what attaches it, and it names the creature grown as a tentacle,
+# so a mod can define its own kraken by copying these two entries and pointing one at the other.
+"KRAKEN"
+  {
+    viewId = { "kraken_head" }
+    attr = {
+      DAMAGE 28
+      DEFENSE 28
+    }
+    body = {
+      type = NonHumanoid LARGE
+      deathSound = none
+      canCapture = false
+    }
+    permanentEffects = {
+      POISON_RESISTANT 1
+      NIGHT_VISION 1
+      SWIMMING_SKILL 1
+    }
+    name = {
+      name = KRAKEN
+    }
+    canJoinCollective = false
+    killedAchievement = "killed_kraken"
+    krakenTendril = "KRAKEN_TENTACLE"
+  }
+"KRAKEN_TENTACLE"
+  {
+    # LAND is the base sprite and water is the exception, matching the engine's old test
+    # (canEnter(SWIM) ? kraken_water : kraken_land): anything not listed in liquidViewId below -- dry floor,
+    # magma, a modded surface -- falls back to this one.
+    viewId = { "kraken_land" }
+    attr = {
+      DAMAGE 28
+      DEFENSE 28
+    }
+    body = {
+      type = NonHumanoid LARGE
+      deathSound = none
+      canCapture = false
+    }
+    permanentEffects = {
+      POISON_RESISTANT 1
+      NIGHT_VISION 1
+      SWIMMING_SKILL 1
+    }
+    name = {
+      name = KRAKEN_TENTACLE
+    }
+    canJoinCollective = false
+    # Sprite by the liquid it is standing in. The engine used to pick kraken_water vs kraken_land in code with
+    # no way for content to reach it; unlisted ground just keeps the viewId above.
+    liquidViewId = {
+      "WATER" { "kraken_water" }
+      "UNDERGROUND_WATER" { "kraken_water" }
+      "ENCHANTED_WATER" { "kraken_water" }
     }
   }

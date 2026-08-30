@@ -28,6 +28,7 @@
 #include "view_id.h"
 #include "spell_id.h"
 #include "creature_id.h"
+#include "furniture_type.h"
 #include "spell_school_id.h"
 #include "creature_inventory.h"
 #include "creature_predicate.h"
@@ -137,6 +138,15 @@ class CreatureAttributes {
   int SERIAL(maxPromotions) = 1000;
   vector<BuffId> SERIAL(permanentBuffs);
   optional<AchievementId> SERIAL(killedAchievement);
+  // RAR: makes this creature a KRAKEN -- it gets the tentacle-growing controller, and the tentacles it grows
+  // are THIS creature id (an ordinary creatures.txt entry), instead of the hardcoded vanilla tentacle. Unset
+  // means an ordinary creature, so nothing that omits it is affected.
+  optional<CreatureId> SERIAL(krakenTendril);
+  // RAR: sprite chosen by the LIQUID the creature stands in, e.g. a kraken tentacle that looks different in
+  // water, magma or enchanted water. Keyed by the GROUND-layer furniture type; anything not listed leaves the
+  // creature's ordinary viewId alone. This replaced a hardcoded kraken_water/kraken_land swap in the kraken
+  // controller, which no mod could reach.
+  map<FurnitureType, ViewId> SERIAL(liquidViewId);
   optional<AchievementId> SERIAL(killedByAchievement);
   optional<AchievementId> SERIAL(steedAchievement);
   HashSet<AttrType> SERIAL(fixedAttr);
@@ -183,4 +193,4 @@ class CreatureAttributes {
   CreatureInventory SERIAL(inventory);
 };
 
-CEREAL_CLASS_VERSION(CreatureAttributes, 2)
+CEREAL_CLASS_VERSION(CreatureAttributes, 3)

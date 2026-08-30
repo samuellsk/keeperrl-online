@@ -418,7 +418,10 @@ void prettyEpilogue(PrettyInputArchive& ar1) {
             ar1.error("Value defined twice: \"" + name + "\"");
           processed.insert(name);
           bool initialize = true;
-          if (ar1.peek() == "append") {
+          // Both keywords build ON the inherited value, so neither may reset the field first. append_after
+          // needs it even more than append does: it searches the existing contents for its anchor, and a
+          // field reset to T{} is empty, so the anchor could never be found.
+          if (ar1.peek() == "append" || ar1.peek() == "append_after" || ar1.peek() == "replace") {
             if (!appending)
               ar1.error("Can't append to value that wasn't inherited");
             initialize = false;

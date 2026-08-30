@@ -9,17 +9,22 @@
 // that is exactly when you need it most. Its only dependencies are libcurl and rar_hash.h, which is a
 // header-only SHA-256 with no includes of its own. It never loads game content and never links the engine.
 //
-// AUTHORITY ORDER (deliberate):
-//   1. GitHub  -- the release the player installed. Works with no game server, and is the public baseline.
-//   2. The game server, checked by the game itself at login. If a server publishes different content it WINS,
-//      so somebody running a private server with their own rules has clients follow that server rather than
-//      being pinned to the public release.
+// AUTHORITY (deliberate): THE GAME SERVER YOU ARE CONNECTING TO -- never a release URL.
+//   1. server_list_url (the public list, hosted on github) -> download it -> the server it names.
+//   2. No list, or it cannot be fetched -> server_url from appconfig, which for a local test setup is
+//      localhost, so a local server's rules are what a local client is checked against.
+// Github's ONLY role is hosting the list of servers. The manifest and the file bytes always come from a game
+// server, so whoever runs the server decides the rules its players run on. Checking against a published
+// release instead would pin every client to one snapshot no matter whose server they were actually on.
 //
 // The player is always TOLD what was repaired. Silent repair would mean quietly changing someone's game.
 
 #include "rar_hash.h"     // rarSha256Hex -- header-only, no dependencies
 
 #include <curl/curl.h>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -48,8 +53,46 @@ size_t writeCb(char* ptr, size_t size, size_t nmemb, void* userdata) {
   return size * nmemb;
 }
 
-// GET a URL into `out`. Plain HTTPS with normal CA verification -- this talks to GitHub, not to our
-// self-signed game server, so the pinning the game client uses does not apply here.
+// GET a URL into `out`. Two kinds of host: the PUBLIC server list (ordinary CA verification) and a GAME
+// SERVER (self-signed + pinned key + PSK knock) -- see the branch inside.
+// ---- talking to a GAME SERVER (knock + pinned key), mirroring rar_client.cpp ------------------------------
+// The server drops any connection that does not open with the PSK knock, and presents a self-signed identity
+// verified by pinned public key. Both values come from the same appconfig the game reads, so the updater and
+// the game trust exactly the same server. Kept byte-compatible with rar_client's knockFor/openSocketKnockCb --
+// if one changes, both must.
+std::string g_psk, g_certPin;
+
+std::string knockFor(long window) {
+  std::string msg = "rar-knock:" + std::to_string(window);
+  unsigned char mac[EVP_MAX_MD_SIZE];
+  unsigned int len = 0;
+  HMAC(EVP_sha256(), g_psk.data(), (int) g_psk.size(),
+      (const unsigned char*) msg.data(), msg.size(), mac, &len);
+  return std::string((char*) mac, len);
+}
+
+curl_socket_t openSocketKnockCb(void*, curlsocktype, struct curl_sockaddr* addr) {
+  curl_socket_t s = ::socket(addr->family, addr->socktype, addr->protocol);
+  if (s == CURL_SOCKET_BAD)
+    return CURL_SOCKET_BAD;
+  if (::connect(s, &addr->addr, addr->addrlen) != 0) {
+    closesocket(s);
+    return CURL_SOCKET_BAD;
+  }
+  std::string k = knockFor((long) (std::time(nullptr) / 30));
+  size_t sent = 0;
+  while (sent < k.size()) {
+    int n = ::send(s, k.data() + sent, (int) (k.size() - sent), 0);
+    if (n <= 0) { closesocket(s); return CURL_SOCKET_BAD; }
+    sent += (size_t) n;
+  }
+  return s;
+}
+
+int sockoptKnockCb(void*, curl_socket_t, curlsocktype) {
+  return CURL_SOCKOPT_ALREADY_CONNECTED;
+}
+
 bool httpGet(const std::string& url, std::string& out) {
   CURL* c = curl_easy_init();
   if (!c)
@@ -62,11 +105,25 @@ bool httpGet(const std::string& url, std::string& out) {
   curl_easy_setopt(c, CURLOPT_TIMEOUT, 60L);
   curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 10L);
   curl_easy_setopt(c, CURLOPT_USERAGENT, "keeper_updater");
-  // Windows libcurl ships no CA bundle, so ordinary HTTPS verification fails against GitHub with a
-  // "could not reach" that looks exactly like being offline. Use the OS certificate store instead.
-  // Verification stays ON: this is a plain public host, not our pinned self-signed game server.
+  // The server list is a PUBLIC host (github): ordinary CA verification, and Windows libcurl ships no CA
+  // bundle, so use the OS store or it fails in a way that looks exactly like being offline.
+  // A GAME SERVER is different -- self-signed, pinned public key, and it answers nothing without the PSK
+  // knock. Which one this is, is decided by whether we have a pin: only game-server URLs are built from the
+  // pinned config.
+  const bool gameServer = !g_certPin.empty() && !g_psk.empty() && url.find("/data_free_") != std::string::npos;
+  if (gameServer) {
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(c, CURLOPT_PINNEDPUBLICKEY, g_certPin.c_str());
+    curl_easy_setopt(c, CURLOPT_OPENSOCKETFUNCTION, openSocketKnockCb);
+    curl_easy_setopt(c, CURLOPT_SOCKOPTFUNCTION, sockoptKnockCb);
+    // Same reason as the game client: the server binds IPv4 only, and a hostname that resolves to ::1 first
+    // costs a full SYN-retransmit cycle on a blocking connect before falling back.
+    curl_easy_setopt(c, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+  }
 #ifdef CURLSSLOPT_NATIVE_CA
-  curl_easy_setopt(c, CURLOPT_SSL_OPTIONS, (long) CURLSSLOPT_NATIVE_CA);
+  else
+    curl_easy_setopt(c, CURLOPT_SSL_OPTIONS, (long) CURLSSLOPT_NATIVE_CA);
 #endif
   CURLcode res = curl_easy_perform(c);
   long code = 0;
@@ -214,19 +271,57 @@ int main(int argc, char** argv) {
     launchGame(gameExe, argc, argv);
     return 0;
   }
-  std::string manifestUrl = configValue(cfg, "manifest_url");
-  std::string contentBase = configValue(cfg, "content_base_url");
-  if (manifestUrl.empty() || contentBase.empty()) {
-    // Not configured => nothing to check against. Never block the player over a missing setting.
-    std::printf("[updater] manifest_url/content_base_url not set in appconfig.txt -- skipping the check.\n");
+  g_psk = configValue(cfg, "server_psk");
+  g_certPin = configValue(cfg, "server_cert_pin");
+  curl_global_init(CURL_GLOBAL_DEFAULT);
+
+  // WHICH server publishes the rules we must match -- resolved exactly the way the game resolves it:
+  //   1. server_list_url (the public list, hosted on github) -> download it -> the server it names
+  //   2. that list missing or unreachable -> server_url from appconfig (a local test server, typically)
+  // Github only ever hosts the LIST. The manifest and the files themselves always come from a GAME SERVER,
+  // so whoever runs the server decides the rules its own players run on -- localhost included. Checking
+  // against a release URL instead would pin every client to one published snapshot no matter whose server
+  // they actually play on.
+  std::string serverBase;
+  std::string listUrl = configValue(cfg, "server_list_url");
+  if (!listUrl.empty()) {
+    std::string listText;
+    if (httpGet(listUrl, listText)) {
+      std::istringstream ls(listText);
+      std::string line;
+      while (std::getline(ls, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+          line.pop_back();
+        size_t s = line.find_first_not_of(" \t");
+        if (s == std::string::npos) continue;
+        line = line.substr(s);
+        if (line.empty() || line[0] == '#')
+          continue;                      // comments + blanks, same as the game's parser
+        serverBase = "https://" + line;  // "host:port"
+        break;                           // first entry, same as the game
+      }
+      std::printf("[updater] server list %s -> %s\n", listUrl.c_str(),
+          serverBase.empty() ? "(no usable entry)" : serverBase.c_str());
+    } else
+      std::printf("[updater] could not fetch the server list (%s) -- falling back to server_url.\n",
+          listUrl.c_str());
+  }
+  if (serverBase.empty())
+    serverBase = configValue(cfg, "server_url");
+  while (!serverBase.empty() && serverBase.back() == '/')
+    serverBase.pop_back();
+  if (serverBase.empty()) {
+    std::printf("[updater] no server to check against (no server_list_url, no server_url) -- skipping.\n");
+    curl_global_cleanup();
     launchGame(gameExe, argc, argv);
     return 0;
   }
-
-  curl_global_init(CURL_GLOBAL_DEFAULT);
+  std::printf("[updater] checking game rules against %s\n", serverBase.c_str());
+  const std::string manifestUrl = serverBase + "/data_free_manifest";
+  const std::string contentBase = serverBase + "/data_free_file/";
   std::string manifestText;
   if (!httpGet(manifestUrl, manifestText)) {
-    // Offline, or GitHub is down. That must never stop someone playing.
+    // Server down or unreachable. That must never stop someone playing.
     std::printf("[updater] could not reach %s -- skipping the check.\n", manifestUrl.c_str());
     curl_global_cleanup();
     if (!checkOnly) launchGame(gameExe, argc, argv);

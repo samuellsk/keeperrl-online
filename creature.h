@@ -129,6 +129,9 @@ class Creature : public Renderable, public UniqueEntity<Creature>, public OwnedO
   int getAttrWithExp(AttrType, int combatExperience, bool includeWeapon = true) const;
   int getSpecialAttr(AttrType, const Creature* against) const;
   int getAttrBonus(AttrType, int rawAttr, bool includeWeapon) const;
+  // RAR: product of every active buff's damageMultiplier (the mirror of defenseMultiplier). Applied to the
+  // blow being rolled, never to the displayed attribute.
+  double getBuffDamageMultiplier(AttrType damageType) const;
 
   double getFlankedMod() const;
   int getPoints() const;

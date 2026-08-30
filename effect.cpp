@@ -115,10 +115,46 @@ vector<Creature*> Effect::summon(Creature* c, CreatureId id, int num, optional<T
     creatures.push_back(c->getGame()->getContentFactory()->getCreatures().fromId(id, c->getTribeId(),
         MonsterAIFactory::summoned(c)));
   auto ret = summonCreatures(position.value_or(c->getPosition()), std::move(creatures), delay);
+  // A TIMED summon additionally gets half the summoner's best attack stat on top of the inherited experience.
+  // Experience alone tracks how far the summoner has come, not how strong they are: a caster with SPELL_DAMAGE
+  // 40 and little experience produced summons barely better than the base creature, which made summoning weak
+  // exactly for the classes built around it.
+  //
+  // Only when ttl is set. Companions come through this same function with ttl = none and keep the plain
+  // inherited experience -- they are permanent and are separately kept in step via statsBase.
+  //
+  // The bonus is added to the combat-experience number rather than written onto attributes, so it flows
+  // through the EXISTING rule in Creature::getRawAttr: it lands on DEFENSE, on anything with a maxExpLevel,
+  // and on any attribute already above zero that is not fixedAttr -- i.e. exactly the "stats higher than 0"
+  // the summon actually uses, and nothing it has no business gaining.
+  double bonus = 0;
+  if (ttl) {
+    int best = 0;
+    for (auto& attr : c->getGame()->getContentFactory()->attrInfo)
+      if (attr.second.isAttackAttr)
+        best = max(best, c->getAttr(attr.first));
+    bonus = best / 2.0;
+  }
   for (auto summoned : ret) {
-    summoned->setCombatExperience(c->getCombatExperience(false, false));
-    if (ttl)
+    summoned->setCombatExperience(c->getCombatExperience(false, false) + bonus);
+    if (ttl) {
       summoned->addEffect(LastingEffect::SUMMONED, *ttl, false);
+      // A TIMED summon stays OUT of the collective, the way a companion does (summonPersonal sets the same
+      // flag). This is what makes it follow its summoner: joining a collective replaces the creature's
+      // controller wholesale --
+      //
+      //   if (!traits.contains(MinionTrait::FARM_ANIMAL) && !c->getController()->dontReplaceInCollective())
+      //     c->setController(makeOwner<Monster>(c, MonsterAIFactory::collective(this)));
+      //
+      // -- which throws away the MonsterAIFactory::summoned stack built above, and with it the Summoned
+      // behaviour that pulls the creature back toward whoever summoned it. So a recruited summon would
+      // engage once and then wander off onto collective tasks instead of guarding its summoner.
+      //
+      // Only TIMED summons. An untimed one is a permanent creature that belongs in the collective, gets
+      // orders and levels up on its own; taking that away would be a real loss. A temporary one exists to
+      // fight beside the caster for a few turns and then vanish.
+      summoned->getAttributes().setCanJoinCollective(false);
+    }
   }
   return ret;
 }
@@ -662,17 +698,35 @@ void Effects::Summon::serialize(Archive& ar, const unsigned int version) {
 template <class Archive>
 void Effects::SummonInvasion::serialize(Archive& ar, const unsigned int version) {
   ar(creature, count, ttl, requireAllDead, summoned);
+  if (version >= 1)
+    ar(group, waveInterval, nextWave);
 }
 
 static bool apply(const Effects::Summon& e, Position pos, Creature* attacker) {
   if (auto c = pos.getCreature()) {
     auto res = Effect::summon(c, e.creature, Random.get(e.count), e.ttl.map([](int v) { return TimeInterval(v); }), 1_visible);
-    if (!e.getsKillCredit)
-      for (auto summoned : res) {
+    // KILL CREDIT goes to the summoner for any TIMED summon, and for anything the content explicitly marked
+    // `noKillCredit`. A temporary summon expires, so experience it earns on its own is simply destroyed --
+    // along with the slayer title, which is awarded to whoever gets the credit. Crediting the summoner is the
+    // only reading under which killing something with a summon means anything.
+    //
+    // Untimed summons keep the old opt-in behaviour: they are permanent creatures that live in the collective
+    // and level up on their own, so their kills are genuinely theirs.
+    //
+    // Combat experience is NOT re-set here. Effect::summon already gave this creature the summoner's
+    // experience plus half its best attack stat, and re-assigning it threw that bonus away for every summon
+    // that redirects kill credit -- the same summons most meant to be expendable muscle. It also read a
+    // different creature (`attacker` rather than the summoner `c`) and the promotion-capped value, so the two
+    // paths disagreed about how strong a summon should be. One place decides now.
+    if (!e.getsKillCredit || e.ttl)
+      for (auto summoned : res)
         summoned->getsKillCredits = c->getUniqueId();
-        summoned->setCombatExperience(attacker->getCombatExperience(true, false));
+    // The aiType override stays OPT-IN, deliberately not extended to every timed summon: it is permanent, it
+    // is displayed in the minion panel and the player can switch it, and forcing MELEE on a ranged summon
+    // would change how it fights. Fearlessness already comes from the SUMMONED check in shouldAIAttack.
+    if (!e.getsKillCredit)
+      for (auto summoned : res)
         summoned->getAttributes().setAIType(AIType::MELEE);
-      }
     return !res.empty();
   } else {
     auto tribe = [&] {
@@ -797,17 +851,69 @@ static TString getDescription(const Effects::SummonInvasion& e, const ContentFac
     return TSentence("SUMMON_HOSTILE_SINGLE_EFFECT_DESCRIPTION", f->getCreatures().getName(e.creature));
 }
 
+// Waves shared between every spawner naming the same group. Deliberately keyed by creature ID and NOT
+// serialized: these are raw ids resolved against the live level, so nothing here can dangle the way a stored
+// Creature* would when a level is freed. The cost of not saving it is one extra wave after a load, which is
+// far better than a stale pointer.
+struct InvasionWave {
+  vector<UniqueEntity<Creature>::Id> ids;
+  optional<GlobalTime> nextAllowed;   // quiet period after the last wave fell
+};
+
+static map<string, InvasionWave>& getInvasionGroups() {
+  static map<string, InvasionWave> ret;
+  return ret;
+}
+
+// Is this group's wave still standing? Resolves ids against the level the spawner is on. A creature that is
+// dead has already left the level, so "not found" means gone; stunned counts as gone too, exactly as in
+// ExternalEnemies::updateCurrentWaves -- a stunned creature has been captured and isn't coming back.
+static bool invasionGroupBusy(const string& group, Position pos, optional<int> waveInterval, GlobalTime now) {
+  auto it = getInvasionGroups().find(group);
+  if (it == getInvasionGroups().end() || it->second.ids.empty())
+    return false;
+  auto level = pos.getLevel();
+  if (!level)
+    return false;
+  for (auto c : level->getAllCreatures())
+    if (!c->isDead() && !c->isAffected(LastingEffect::STUNNED))
+      for (auto& id : it->second.ids)
+        if (c->getUniqueId() == id)
+          return true;
+  // The wave has just been found gone. The quiet period starts HERE, so `interval` counts from the last one
+  // falling rather than from when the wave was sent.
+  it->second.ids.clear();
+  if (waveInterval)
+    it->second.nextAllowed = now + TimeInterval(*waveInterval);
+  return false;
+}
+
 static bool apply(const Effects::SummonInvasion& e, Position pos, Creature*) {
   // Don't send a new wave while the last one is still standing. Stunned counts as dead, exactly as in
   // ExternalEnemies::updateCurrentWaves -- a stunned creature has been captured and isn't coming back.
-  if (e.requireAllDead)
-    for (auto c : e.summoned)
-      if (!c->isDead() && !c->isAffected(LastingEffect::STUNNED))
-        return false;
-  e.summoned.clear();
+  //
+  // With a GROUP, that question is asked of the whole group instead of this one tile, so ten lava tiles send
+  // one wave between them rather than ten. Whichever ticks first wins the slot: it records its summons under
+  // the group before any other tile ticks, so the rest see a live wave and hold.
   auto game = pos.getGame();
   if (!game)
     return false;
+  const auto now = game->getGlobalTime();
+  if (e.group && e.requireAllDead && invasionGroupBusy(*e.group, pos, e.waveInterval, now))
+    return false;
+  if (e.requireAllDead) {
+    for (auto c : e.summoned)
+      if (!c->isDead() && !c->isAffected(LastingEffect::STUNNED))
+        return false;
+    // Ungrouped spawners keep their own clock, started the same way -- when their wave is found gone.
+    if (!e.group && !e.summoned.empty() && e.waveInterval)
+      e.nextWave = now + TimeInterval(*e.waveInterval);
+  }
+  // Still inside the quiet period after the last wave fell.
+  if (auto next = e.group ? getInvasionGroups()[*e.group].nextAllowed : e.nextWave)
+    if (now < *next)
+      return false;
+  e.summoned.clear();
   auto target = game->getPlayerCollective();
   if (!target)
     return false;
@@ -837,8 +943,24 @@ static bool apply(const Effects::SummonInvasion& e, Position pos, Creature*) {
     c->setCombatExperience(pos.getModelDifficulty());
     if (e.ttl)
       c->addEffect(LastingEffect::SUMMONED, TimeInterval(*e.ttl), false);
+    // INVASION UNITS. A separate branch for creatures summoned by THIS effect, deliberately independent of
+    // the ttl/SUMMONED wiring above -- that belongs to timed summons and stays exactly as it is. These are
+    // invaders: they exist to reach the keeper, so they never lose their nerve and turn back, whether or not
+    // a ttl was given. AIType::MELEE is the engine's existing "attacks regardless of the odds" switch
+    // (Creature::shouldAIAttack); they are hostile, so it never shows up in the player's minion panel.
+    c->getAttributes().setAIType(AIType::MELEE);
   }
   e.summoned = ret;
+  // Register the wave under the group BEFORE returning, so the other spawners in it see a live wave on the
+  // very next tick and stay quiet. This is what turns a whole pool into a single summoner.
+  if (e.group) {
+    auto& wave = getInvasionGroups()[*e.group];
+    wave.ids.clear();
+    wave.nextAllowed = none;      // consumed -- the clock restarts when this wave falls
+    for (auto c : ret)
+      wave.ids.push_back(c->getUniqueId());
+  } else
+    e.nextWave = none;
   // Raise the same "you are under attack" banner the endless waves do, so the wave isn't silent.
   target->getControl()->addAttack(CollectiveAttack({attackTaskRef},
       creatureFactory.getNamePlural(e.creature), creatureList.getViewId(&creatureFactory), ret));
@@ -1649,6 +1771,38 @@ EffectAIIntent considerArea(const Creature* caster, const Range& range, const Ef
 
 static EffectAIIntent shouldAIApply(const Effects::Area& a, const Creature* caster, Position pos) {
   return considerArea(caster, pos.getRectangle(Rectangle::centered(a.radius)), *a.effect);
+}
+
+// The circle: every tile of the bounding square whose real distance from the centre is within the radius.
+// Rectangle::centered gives the candidates cheaply; distD does the actual shaping, so radius 5 reaches 5 in
+// every direction rather than 7 diagonally.
+static bool isInCircle(Position center, Position v, int radius) {
+  return center.getCoord().distD(v.getCoord()) <= double(radius) + 0.5;
+}
+
+static bool apply(const Effects::CircularArea& area, Position pos, Creature* attacker) {
+  bool res = false;
+  for (auto v : pos.getRectangle(Rectangle::centered(area.radius)))
+    if (isInCircle(pos, v, area.radius))
+      res |= area.effect->apply(v, attacker);
+  return res;
+}
+
+static TString getDescription(const Effects::CircularArea& e, const ContentFactory* factory) {
+  return TSentence("CIRCULAR_AREA_EFFECT_DESCRIPTION", TString(e.radius), e.effect->getDescription(factory));
+}
+
+static TString getName(const Effects::CircularArea& e, const ContentFactory* factory) {
+  return TSentence("CIRCULAR_AREA_EFFECT_NAME", e.effect->getName(factory));
+}
+
+static EffectAIIntent shouldAIApply(const Effects::CircularArea& a, const Creature* caster, Position pos) {
+  // Judge the AI on the tiles it will ACTUALLY hit, or it weighs corners it never touches.
+  vector<Position> inside;
+  for (auto v : pos.getRectangle(Rectangle::centered(a.radius)))
+    if (isInCircle(pos, v, a.radius))
+      inside.push_back(v);
+  return considerArea(caster, inside, *a.effect);
 }
 
 static TString getName(const Effects::CustomArea& e, const ContentFactory* f) {
@@ -2747,6 +2901,26 @@ static bool applyToCreature(const Effects::AddMinionTrait& trait, Creature* c, C
   return false;
 }
 
+static TString getName(const Effects::AddMinionTraitPlayer& e, const ContentFactory* f) {
+  return TStringId("MINION_TRAIT_EFFECT_NAME");
+}
+
+static TString getDescription(const Effects::AddMinionTraitPlayer& e, const ContentFactory* f) {
+  return TStringId("MINION_TRAIT_EFFECT_NAME");
+}
+
+// Deliberately asks the GAME for the player's collective rather than searching for whichever collective
+// happens to hold this creature: a creature can sit in a settlement's own collective while sharing the
+// player's tribe, and that is exactly the case this exists to ignore. Returns false -- no effect applied --
+// until the creature has actually been recruited, so a self-removing ability stays armed until then.
+static bool applyToCreature(const Effects::AddMinionTraitPlayer& e, Creature* c, Creature* attacker) {
+  if (auto game = c->getGame())
+    if (auto col = game->getPlayerCollective())
+      if (col->getCreatures().contains(c))
+        return col->setTrait(c, e.trait);
+  return false;
+}
+
 static TString getName(const Effects::RemoveMinionTrait& e, const ContentFactory*) {
   return TStringId("REMOVE_MINION_TRAIT_EFFECT_NAME");
 }
@@ -3122,6 +3296,19 @@ void Effects::SummonInvasion::serialize(PrettyInputArchive& ar, const unsigned i
   ar(creature);
   if (ar.eatMaybe("allowResummon"))
     requireAllDead = false;
+  // `group "name"` -- every spawner naming the same group shares one wave. Read before count/ttl so the
+  // existing positional syntax is untouched for anything that omits it.
+  if (ar.eatMaybe("group")) {
+    string s;
+    ar(s);
+    group = s;
+  }
+  // `interval N` -- the quiet gap after a wave dies before the next may be sent.
+  if (ar.eatMaybe("interval")) {
+    int n = 0;
+    ar(n);
+    waveInterval = n;
+  }
   ar(count, ttl);
 }
 

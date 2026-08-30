@@ -16,6 +16,7 @@
 #include "resource_info.h"
 #include "layout_mapping_id.h"
 #include "layout_mapping.h"
+#include "layout_group.h"
 #include "keeper_creature_info.h"
 #include "tile_gas_type.h"
 #include "dancing.h"
@@ -74,6 +75,11 @@ class ContentFactory {
   HashMap<CollectiveResourceId, ResourceInfo> SERIAL(resourceInfo);
   vector<CollectiveResourceId> SERIAL(resourceOrder);
   map<LayoutMappingId, LayoutMapping> SERIAL(layoutMapping);
+  // RAR: tribe-dependent creature pools for layout tokens (layout_groups.txt). DELIBERATELY NOT SERIALIZED and
+  // deliberately absent from ContentFactory::serialize: adding a field there rewrites the format of every save
+  // AND every pre-generated villain blob, which orphans all of them. This is pure config -- it is rebuilt by
+  // createContentFactory on every load, so it never needs to travel inside a save.
+  map<string, vector<LayoutGroupEntry>> layoutGroups;
   map<RandomLayoutId, LayoutGenerator> SERIAL(randomLayouts);
   map<TileGasType, TileGasInfo> SERIAL(tileGasTypes);
   map<string, vector<PromotionInfo>> SERIAL(promotions);

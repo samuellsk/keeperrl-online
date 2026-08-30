@@ -133,7 +133,9 @@ class MainLoop {
   string bundleMod(const string& modName);       // serialize a mod dir's files -> bytes
   void unbundleMod(const string& modName, const string& bytes); // install bytes -> mod dir
   void publishServerMods();                       // admin/gen side: write rar_mods/ + rar_mods.txt
-  bool syncServerMods();                          // client side: match local mods to the server. false=abort
+  bool syncServerMods();
+  // RAR: pull data_free (rule files) from the server we are connected to, when its hash differs from ours.
+  void syncServerDataFree();                         // client side: match local data_free to the server
   bool modsChangedThisSync = false;               // syncServerMods sets this: a mod was (re)installed or the
                                                   // enabled set changed -> the tileset must be reloaded. If the
                                                   // hashes already matched, it stays false and we skip the reload.

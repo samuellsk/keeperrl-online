@@ -80,6 +80,9 @@ class PlayerControl : public CreatureView, public CollectiveControl, public Even
   STutorial getTutorial() const;
   bool isEnemy(const Creature*) const;
   void addToMemory(Position);
+  // DEV cheat: finish the stairs at `pos` immediately so its FurnitureOnBuilt hook runs and the z-level is
+  // generated + linked, instead of ordering imps to dig and build.
+  void buildStairsNow(Position pos, FurnitureType type);
 
   SERIALIZATION_DECL(PlayerControl)
 
@@ -227,6 +230,11 @@ class PlayerControl : public CreatureView, public CollectiveControl, public Even
   // FIRST return (before it's destroyed), instead of forcing a re-visit. getPillagedItems is the FRESH
   // (non-cached) loot check the invasion path uses instead of the cache-prone VillageControl::canPillage.
   vector<Item*> getPillagedItems(Collective*) const;
+  // DIAGNOSTIC ONLY -- counts and prints, changes nothing. Walks the same loop as getPillagedItems and reports
+  // how many positions survive each stage, next to what the pillage BUTTON's own check answers. Exists to
+  // separate "no items at the source" from "items dropped by a later stage" when the button and the action
+  // disagree. Touches no pillage logic and is not on the invasion path.
+  void rarLogPillageDiagnostic(Collective*) const;
   // RAR pillage: what a pillage of THIS site would actually hand over, as a small text manifest -- one line
   // per defeated collective and item stack. Built from getPillagedItems so it can never describe loot the
   // real pillage wouldn't give. Cheap (a full item scan measured ~1ms), so the client that has the model

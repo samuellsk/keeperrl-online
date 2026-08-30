@@ -58,6 +58,8 @@ const char* GameConfig::getConfigName(GameConfigId id) {
       return "resource_info";
     case GameConfigId::LAYOUT_MAPPING:
       return "layout_mapping";
+    case GameConfigId::LAYOUT_GROUPS:
+      return "layout_groups";
     case GameConfigId::RANDOM_LAYOUTS:
       return "random_layouts";
     case GameConfigId::STORAGE_IDS:

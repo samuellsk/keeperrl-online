@@ -125,8 +125,6 @@ append {
       {{Potion Heal { SPIRIT }}              4        "GOLD" 20      "advanced alchemy"}
       {{GasPotion("FOG", WORKSHOPS_MENU_TYPE28)} 4   "GOLD" 10      "advanced alchemy"}
       {{GasPotion("POISON_GAS", WORKSHOPS_MENU_TYPE29)} 4   "GOLD" 30    "advanced alchemy"}
-      {item = {Potion OneTimeBoost() IncreaseAttr DEFENSE 5} work = 20 cost = "GOLD" 100
-          requireIngredient = "cyclops_brain" }
       {item = {Potion Lasting PLAGUE} work = 5 cost = "GOLD" 10 requireIngredient = "zombie_brain" }
       {item = {Potion OneTimeBoost() Permanent POISON_RESISTANT} work = 20 cost = "GOLD" 80
           requireIngredient = "hydra_tongue" }

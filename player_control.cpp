@@ -971,6 +971,18 @@ ViewId PlayerControl::getViewId(const BuildInfoTypes::BuildType& info) const {
       },
       [&](BuildInfoTypes::PlaceItemNew) {
         return ViewId("potion1");
+      },
+      [&](BuildInfoTypes::RevealLevel) {
+        return ViewId("magma");
+      },
+      [&](BuildInfoTypes::ZLevelDown) {
+        return ViewId("down_staircase");
+      },
+      [&](BuildInfoTypes::ZLevelUp) {
+        return ViewId("up_staircase");
+      },
+      [&](BuildInfoTypes::PlaceFurnitureNew) {
+        return ViewId("bridge");
       }
   );
 }
@@ -1437,7 +1449,49 @@ void PlayerControl::reinjectLootStore(Model* model, const string& storeData) {
       Position(Vec2(e.x, e.y), levels[e.levelIndex]).dropItem(std::move(e.item));
 }
 
+// DIAGNOSTIC ONLY. Mirrors getPillagedItems stage by stage and counts what each one keeps, so a case where
+// the button offers PILLAGE but the action finds nothing says WHICH stage empties the list. Nothing here
+// alters state: it reads positions and items, and the canPillage call below is the same one that already ran
+// to draw the button (its answer is cached, so asking again cannot change behaviour).
+void PlayerControl::rarLogPillageDiagnostic(Collective* col) const {
+  int positions = 0, ownerOk = 0, notMine = 0, posWithItems = 0, itemsSeen = 0, itemsKept = 0, itemsFiltered = 0;
+  for (Position v : col->getTerritory().getPillagePositions()) {
+    ++positions;
+    const bool ownerOwns = (v.getCollective() == col || !v.getCollective());
+    const bool isMine = collective->getTerritory().contains(v);
+    if (ownerOwns)
+      ++ownerOk;
+    if (!ownerOwns || isMine)
+      continue;
+    ++notMine;
+    auto& items = v.getItems();
+    if (items.empty())
+      continue;
+    ++posWithItems;
+    for (auto it : items) {
+      ++itemsSeen;
+      if (collective->getStoragePositions(it->getStorageIds()).contains(v))
+        ++itemsFiltered;
+      else
+        ++itemsKept;
+    }
+  }
+  // The collective's id is enough to tell the rows apart and needs no translation lookup.
+  auto name = toString(col->getUniqueId().getGenericId());
+  rarTakeoverLog("pillage diag col#" + name
+      + ": territory+extended=" + toString(positions)
+      + " ownedByThem=" + toString(ownerOk)
+      + " notInMyTerritory=" + toString(notMine)
+      + " ofThoseWithItems=" + toString(posWithItems)
+      + " items=" + toString(itemsSeen)
+      + " keptByStorageFilter=" + toString(itemsKept)
+      + " droppedByStorageFilter=" + toString(itemsFiltered)
+      + " | getPillagedItems=" + toString((int) getPillagedItems(col).size())
+      + " | buttonCanPillage=" + (col->getControl()->canPillage(collective) ? "YES" : "no"));
+}
+
 void PlayerControl::handlePillage(Collective* col) {
+  rarLogPillageDiagnostic(col);   // diagnostic only -- see above; does not affect what follows
   ScrollPosition scrollPos;
   auto factory = getGame()->getContentFactory();
   ScriptedUIState state;
@@ -2714,6 +2768,32 @@ void PlayerControl::onEvent(const GameEvent& event) {
   );
 }
 
+// DEV cheat behind the "Z-level down/up" build entries. Rather than duplicate the level-generation code, this
+// just COMPLETES the staircase on the spot: Position::construct counts down a build timer and, on the tick it
+// finishes, calls onConstructedBy -> handleOnBuilt, which is the same path a dug-and-built staircase takes.
+// So the new level is generated and linked by the normal code, not a parallel copy of it.
+void PlayerControl::buildStairsNow(Position pos, FurnitureType type) {
+  if (!pos.canConstruct(type)) {
+    // construct() CHECKs this, and a failed CHECK takes the whole game down -- so refuse politely instead.
+    addMessage(PlayerMessage(TString("Can't build stairs on that square."_s), MessagePriority::HIGH));
+    return;
+  }
+  auto leaders = collective->getLeaders();
+  if (leaders.empty()) {
+    addMessage(PlayerMessage(TString("No leader to build with."_s), MessagePriority::HIGH));
+    return;
+  }
+  // construct() ticks a 10-turn timer down by one per call and only fires onBuilt on the last one; call it
+  // until it lands. The bound is a safety net so a furniture that never completes cannot spin forever.
+  for (int i : Range(50)) {
+    pos.construct(type, leaders[0]);
+    if (auto f = pos.getFurniture(getGame()->getContentFactory()->furniture.getData(type).getLayer()))
+      if (f->getType() == type)
+        return;
+  }
+  addMessage(PlayerMessage(TString("Couldn't finish the stairs."_s), MessagePriority::HIGH));
+}
+
 void PlayerControl::updateKnownLocations(const Position& pos) {
   PROFILE;
   /*if (pos.getModel() == getModel())
@@ -3604,7 +3684,13 @@ void PlayerControl::processInput(View* view, UserInput input) {
       // A world-map site has no local collective -- its row carries the synthetic id refreshGameInfo built
       // from its tile. Decode it and pillage over the network instead of looking up a Collective that was
       // never loaded.
-      if (info.id.getGenericId() >= 1000000000LL) {
+      //
+      // The test is "no real collective owns this id", NOT the id's magnitude. A real Collective id is
+      // Random.getLL(), so almost every genuine base-map villain lands above the synthetic base and used to be
+      // dragged down this network path -- its tile decoded from a random number, nothing found, and vanilla
+      // handlePillage never reached. The range check is kept only as a sanity guard on the decode itself,
+      // since synthetic ids are always built as 1000000000 + tile.
+      if (!getVillain(info.id) && info.id.getGenericId() >= 1000000000LL) {
         auto raw = info.id.getGenericId() - 1000000000LL;
         const int colIndex = int(raw / 10000000LL);       // folded in when the row was built
         raw %= 10000000LL;
@@ -3759,6 +3845,57 @@ void PlayerControl::handleSelection(Position position, const BuildInfoTypes::Bui
             position.dropItems(item.get(*num, getGame()->getContentFactory()));
           }
         }
+    },
+    [&](BuildInfoTypes::RevealLevel) {
+      // DEV: mark every tile of the clicked level as known + remembered, which is exactly what walking it
+      // would do. Lets you confirm at a glance whether a random layout (a MiniPrison, say) generated at all.
+      auto level = position.getLevel();
+      int revealed = 0;
+      for (auto v : level->getBounds()) {
+        Position pos(v, level);
+        if (collective->addKnownTile(pos))
+          ++revealed;
+        addToMemory(pos);
+      }
+      addMessage(PlayerMessage(TString("Revealed "_s + toString(revealed) + " new tiles on this level."),
+          MessagePriority::HIGH));
+    },
+    [&](BuildInfoTypes::ZLevelDown) {
+      buildStairsNow(position, FurnitureType("DOWN_STAIRS"));
+    },
+    [&](BuildInfoTypes::ZLevelUp) {
+      buildStairsNow(position, FurnitureType("UP_STAIRS"));
+    },
+    [&](const BuildInfoTypes::PlaceFurnitureNew&) {
+      // Pick from a VISUAL grid of every furniture type (furniture.txt) and place it INSTANTLY. Mirrors
+      // PlaceItemNew, except furniture belongs to a LAYER: a piece can only replace what sits on its own
+      // layer, so this swaps that one layer and leaves the others alone. That is what makes it usable for
+      // laying out pits (MIDDLE) and floor coverings (FLOOR) on the same tile.
+      auto factory = getGame()->getContentFactory();
+      vector<FurnitureType> types;
+      vector<View::ItemChoiceInfo> choices;
+      for (auto& type : factory->furniture.getAllFurnitureType()) {
+        auto& data = factory->furniture.getData(type);
+        // Skip anything with no sprite -- it would be an invisible, unpickable cell in the grid.
+        if (!data.getViewObject())
+          continue;
+        vector<TString> details;
+        details.push_back(TString("layer: "_s + EnumInfo<FurnitureLayer>::getString(data.getLayer())));
+        choices.push_back({data.getViewObject()->getViewIdList(), data.getName(), std::move(details)});
+        types.push_back(type);
+      }
+      if (auto idx = getView()->chooseItem(TString("Choose furniture to place"_s), choices,
+          TStringId("CANCEL_BUTTON"))) {
+        auto type = types[*idx];
+        auto layer = factory->furniture.getData(type).getLayer();
+        // removeFurniture(old, replacement) is the same swap the pit-fill tick uses; addFurniture is only
+        // correct when the layer is empty.
+        if (auto existing = position.getFurniture(layer))
+          position.removeFurniture(existing, factory->furniture.getFurniture(type, getTribeId()));
+        else
+          position.addFurniture(factory->furniture.getFurniture(type, getTribeId()));
+        updateSquareMemory(position);
+      }
     },
     [&](const BuildInfoTypes::PlaceItemNew&) {
       // Pick from a VISUAL grid of every item type (items.txt), then a quantity prompt -- no typing needed.

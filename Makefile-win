@@ -155,6 +155,6 @@ clean:
 # keeper_updater: standalone integrity checker/repairer, run BEFORE the game. Deliberately shares NO game
 # code -- it must keep working against versions whose content format changed. Only libcurl + rar_hash.h.
 keeper_updater.exe: keeper_updater.cpp rar_hash.h
-	$(GCC) -std=c++1y -O2 -o keeper_updater.exe keeper_updater.cpp -lcurl -lws2_32
+	$(GCC) -std=c++1y -O2 -o keeper_updater.exe keeper_updater.cpp -lcurl -lssl -lcrypto -lws2_32
 
 updater: keeper_updater.exe

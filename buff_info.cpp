@@ -36,6 +36,11 @@ void BuffInfo::serialize(Archive& ar, const unsigned int version) {
     ar(OPTION(specialAttr));
   if (version >= 2)
     ar(OPTION(hiddenPredicate));
+  // Version 3, NOT appended to the line above: that list is also the BINARY layout, written into every save
+  // and every pre-generated villain blob. Adding a field there would change the format and orphan all of them.
+  // The pretty archive passes version 1000, so buffs.txt reads these regardless.
+  if (version >= 3)
+    ar(OPTION(damageMultiplier), OPTION(damageMultiplierAttr));
 }
 
 SERIALIZABLE(BuffInfo)

@@ -42,6 +42,16 @@ void SpellMap::remove(SpellId id) {
     }
 }
 
+int SpellMap::refreshFromFactory(const CreatureFactory& factory) {
+  int ret = 0;
+  for (auto& elem : elems)
+    if (auto spell = factory.getSpell(elem.spell.getId())) {
+      elem.spell = *spell;
+      ++ret;
+    }
+  return ret;
+}
+
 void SpellMap::setAllReady() {
   for (auto& elem : elems)
     elem.timeout = none;

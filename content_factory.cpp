@@ -80,7 +80,6 @@ optional<string> ContentFactory::readCreatureFactory(const GameConfig* config, K
   NameGenerator nameGenerator;
   for (auto& elem : firstNames)
     nameGenerator.setNames(elem.first, elem.second);
-  keyVerifier->addKey<CreatureId>("KRAKEN");
   keyVerifier->addKey<CreatureId>("ROLLING_BOULDER_S");
   keyVerifier->addKey<CreatureId>("ROLLING_BOULDER_N");
   keyVerifier->addKey<CreatureId>("ROLLING_BOULDER_E");
@@ -414,6 +413,14 @@ optional<string> ContentFactory::readData(const GameConfig* config, const vector
   if (auto res = config->readObject(tileDefs, GameConfigId::TILES, &keyVerifier))
     return *res;
   tilePaths = TilePaths(std::move(tileDefs), modNames);
+  // BEFORE layout_mapping, because the group names have to be registered as acceptable creature keys first.
+  // A layout token's AlliedPrisoner payload stays a CreatureId (changing its type would rewrite the serialized
+  // form of layoutMapping, i.e. every save and every villain blob); a name that matches a group is resolved
+  // through the group at placement time instead of being looked up as a creature.
+  if (auto res = config->readObject(layoutGroups, GameConfigId::LAYOUT_GROUPS, &keyVerifier))
+    return *res;
+  for (auto& group : layoutGroups)
+    keyVerifier.addKey<CreatureId>(group.first);
   map<PrimaryId<LayoutMappingId>, LayoutMapping> layoutTmp;
   if (auto res = config->readObject(layoutTmp, GameConfigId::LAYOUT_MAPPING, &keyVerifier))
     return *res;

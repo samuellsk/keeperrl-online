@@ -39,6 +39,17 @@ namespace BuildInfoTypes {
   // Like PlaceItem, but pick from a VISUAL grid of every item type (from items.txt) + a quantity prompt,
   // instead of typing the item type by hand.
   using PlaceItemNew = EmptyStruct<struct PlaceItemNewTag>;
+  // DEV: reveal the whole level the clicked tile is on -- known tiles + map memory, as if minions had walked
+  // it. For checking whether a random layout (a MiniPrison, say) actually generated, without exploring.
+  using RevealLevel = EmptyStruct<struct RevealLevelTag>;
+  // DEV: build the stairs INSTANTLY at the clicked tile, which fires the normal FurnitureOnBuilt hook and so
+  // generates/links the z-level exactly as digging would. Saves ordering imps around to test level content.
+  using ZLevelDown = EmptyStruct<struct ZLevelDownTag>;
+  using ZLevelUp = EmptyStruct<struct ZLevelUpTag>;
+  // DEV: pick any furniture type from a VISUAL grid (every entry in furniture.txt) and place it
+  // INSTANTLY at the clicked tile, replacing whatever occupied that furniture's OWN layer. Lets a
+  // pit/bridge/liquid arrangement be laid out by hand for testing, with no digging or build orders.
+  using PlaceFurnitureNew = EmptyStruct<struct PlaceFurnitureNewTag>;
   struct BuildType;
   using Chain = vector<BuildType>;
   #define VARIANT_TYPES_LIST\
@@ -57,7 +68,11 @@ namespace BuildInfoTypes {
     X(Chain, 12)\
     X(FillPit, 13)\
     X(PlaceMinionNew, 14)\
-    X(PlaceItemNew, 15)
+    X(PlaceItemNew, 15)\
+    X(RevealLevel, 16)\
+    X(ZLevelDown, 17)\
+    X(ZLevelUp, 18)\
+    X(PlaceFurnitureNew, 19)
 
   #define VARIANT_NAME BuildType
 

@@ -23,6 +23,8 @@
 #include <openssl/crypto.h>
 #include "rar_hash.h"
 #include "rar_mods.h"
+#include "directory_path.h"   // refreshDataFreeIfChanged: walk data_free for mtimes
+#include "file_path.h"
 
 #include <fstream>
 #include <map>
@@ -182,7 +184,57 @@ std::map<std::string, std::time_t> g_siegeProtected;
 // Clients send theirs at login; a mismatch means their rule files differ from ours (edited, stale, or
 // a different build). Recorded per account so it is visible WHO is running altered content.
 std::string g_dataFreeHash;
+// Per-file "relpath<TAB>sha" list of the same protected content, for keeper_updater. It runs before the game
+// and verifies against the SERVER the player is connecting to (resolved from the server list, or server_url),
+// so each server publishes the rules its own clients must match.
+std::string g_dataFreeManifest;
+// Newest mtime seen under the protected data_free folders. Lets the server notice an edited rule file and
+// re-bundle itself, instead of needing a restart to pick up a one-line change to creatures.txt.
+std::time_t g_dataFreeStamp = 0;
+
+
 std::string g_dataFreeBundle;   // served verbatim to clients that ask; the hash above is its SHA-256
+
+// Rebuild the served data_free (bundle + hash + per-file manifest) when a protected rule file has changed on
+// disk since the last look. Without this the server bundles once at startup, so a one-line edit to
+// creatures.txt needs a full server restart before any client can see it -- a slow loop when the thing being
+// edited is content you are iterating on.
+//
+// The check is a stat of each file, not a re-read: nothing is bundled or hashed unless a timestamp moved.
+// Called from the endpoints a client uses to learn about content, so the refresh happens just before somebody
+// asks -- no polling thread, and no work at all on an idle server.
+static void refreshDataFreeIfChanged() {
+  std::time_t newest = 0;
+  DirectoryPath root("../data_free");
+  if (!root.exists())
+    return;
+  for (auto& sub : {"game_config", "ui"}) {
+    auto dir = root.subdirectory(sub);
+    if (!dir.exists())
+      continue;
+    vector<DirectoryPath> dirs{dir};
+    while (!dirs.empty()) {           // subfolders too -- translations/ lives under game_config
+      auto d = dirs.back();
+      dirs.pop_back();
+      for (auto& f : d.getFiles())
+        newest = max(newest, f.getModificationTime());
+      for (auto& s2 : d.getSubDirs())
+        dirs.push_back(d.subdirectory(s2));
+    }
+  }
+  if (newest == 0 || newest == g_dataFreeStamp)
+    return;
+  const bool first = g_dataFreeStamp == 0;
+  g_dataFreeStamp = newest;
+  if (first)
+    return;                           // startup already bundled; this call just records the stamp
+  g_dataFreeBundle = rarBundleDataFree("../data_free");
+  g_dataFreeHash = g_dataFreeBundle.empty() ? "" : rarSha256Hex(g_dataFreeBundle);
+  g_dataFreeManifest = rarDataFreeManifest("../data_free");
+  std::printf("[data_free] rule files changed on disk -> re-bundled, hash %s\n", g_dataFreeHash.c_str());
+  std::fflush(stdout);
+}
+
 std::map<std::string, std::string> g_clientDataFree;   // login -> last hash the client reported
 std::map<std::string, bool> g_dataFreeBad;             // login -> true if it did not match ours
  // gameId -> protected until
@@ -1370,6 +1422,8 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
   {
   g_dataFreeBundle = rarBundleDataFree("../data_free"); // same relative base as ../mods (we chdir into server/)
   g_dataFreeHash = g_dataFreeBundle.empty() ? "" : rarSha256Hex(g_dataFreeBundle);   // same relative base as ../mods (we chdir into server/)
+  g_dataFreeManifest = rarDataFreeManifest("../data_free"); // per-file list for keeper_updater (pre-launch)
+  refreshDataFreeIfChanged();   // records the current mtime; later calls re-bundle only when it moves
   std::printf("RAR server: data_free hash %s\n",
       g_dataFreeHash.empty() ? "UNAVAILABLE (../data_free not found -- tamper checks disabled)"
                              : g_dataFreeHash.c_str());
@@ -1572,11 +1626,35 @@ void runRarServer(int port, RarVillainGen gen, std::vector<RarVillainCombo> comb
   // connecting to. If the server's content differs, the SERVER wins -- that is what lets someone run their own
   // server with their own rules and have clients follow it, instead of being pinned to the public release.
   svr.Get("/data_free_hash", [](const httplib::Request&, httplib::Response& res) {
+    refreshDataFreeIfChanged();
     res.set_content(g_dataFreeHash, "text/plain");
   });
   svr.Get("/data_free", [](const httplib::Request&, httplib::Response& res) {
+    refreshDataFreeIfChanged();
     if (g_dataFreeBundle.empty()) { res.status = 404; res.set_content("none", "text/plain"); return; }
     res.set_content(g_dataFreeBundle, "application/octet-stream");
+  });
+
+  // What keeper_updater reads BEFORE the game starts: the per-file list, then any file whose hash differs.
+  svr.Get("/data_free_manifest", [](const httplib::Request&, httplib::Response& res) {
+    refreshDataFreeIfChanged();
+    res.set_content(g_dataFreeManifest, "text/plain");
+  });
+  svr.Get(R"(/data_free_file/(.+))", [](const httplib::Request& req, httplib::Response& res) {
+    std::string rel = req.matches[1];
+    // The manifest lists paths as "data_free/<sub>/<file>" -- that is where keeper_updater writes a repaired
+    // file, so it asks for them by that name. Strip the prefix back to the server-relative form.
+    if (rel.compare(0, 10, "data_free/") == 0)
+      rel = rel.substr(10);
+    // Only the protected subtrees, and no traversal: this hands out file bytes to anyone who can knock.
+    if (rel.find("..") != std::string::npos || rel.find('\\') != std::string::npos ||
+        (rel.compare(0, 12, "game_config/") != 0 && rel.compare(0, 3, "ui/") != 0)) {
+      res.status = 400; res.set_content("bad path", "text/plain"); return;
+    }
+    std::ifstream in("../data_free/" + rel, std::ios::binary);
+    if (!in) { res.status = 404; res.set_content("no file", "text/plain"); return; }
+    std::string body((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    res.set_content(body, "application/octet-stream");
   });
 
   svr.Get("/mods", [](const httplib::Request&, httplib::Response& res) {

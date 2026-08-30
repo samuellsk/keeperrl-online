@@ -50,7 +50,6 @@ class CreatureFactory {
   PCreature getGhost(Creature*);
   static PCreature getIllusion(Creature*);
 
-  static CreatureAttributes getKrakenAttributes(ViewId, const TString& name);
   ViewIdList getViewId(CreatureId) const;
   TString getName(CreatureId) const;
   TString getNamePlural(CreatureId) const;

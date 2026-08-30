@@ -2,28 +2,48 @@
   {
     { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
     { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+    { RevealLevel "Reveal level" "Dev Tools" "Reveals the whole floor the clicked tile is on -- check whether a layout generated without exploring for it" none {} false none false true }
+    { ZLevelDown "Z-level down" "Dev Tools" "Builds a down staircase instantly on the clicked tile, generating and linking the level below" none {} false none false true }
+    { ZLevelUp "Z-level up" "Dev Tools" "Builds an up staircase instantly on the clicked tile, generating and linking the level above" none {} false none false true }
+    { PlaceFurnitureNew "Place furniture" "Dev Tools" "Pick any furniture from a visual grid and place it instantly; it replaces whatever sits on that furniture's own layer, so a pit (MIDDLE) and a floor covering (FLOOR) can coexist on one tile" none {} false none false true }
   }
 
 "structure" modify append
   {
     { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
     { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+    { RevealLevel "Reveal level" "Dev Tools" "Reveals the whole floor the clicked tile is on -- check whether a layout generated without exploring for it" none {} false none false true }
+    { ZLevelDown "Z-level down" "Dev Tools" "Builds a down staircase instantly on the clicked tile, generating and linking the level below" none {} false none false true }
+    { ZLevelUp "Z-level up" "Dev Tools" "Builds an up staircase instantly on the clicked tile, generating and linking the level above" none {} false none false true }
+    { PlaceFurnitureNew "Place furniture" "Dev Tools" "Pick any furniture from a visual grid and place it instantly; it replaces whatever sits on that furniture's own layer, so a pit (MIDDLE) and a floor covering (FLOOR) can coexist on one tile" none {} false none false true }
   }
 
 "structure_dwarf" modify append
   {
     { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
     { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+    { RevealLevel "Reveal level" "Dev Tools" "Reveals the whole floor the clicked tile is on -- check whether a layout generated without exploring for it" none {} false none false true }
+    { ZLevelDown "Z-level down" "Dev Tools" "Builds a down staircase instantly on the clicked tile, generating and linking the level below" none {} false none false true }
+    { ZLevelUp "Z-level up" "Dev Tools" "Builds an up staircase instantly on the clicked tile, generating and linking the level above" none {} false none false true }
+    { PlaceFurnitureNew "Place furniture" "Dev Tools" "Pick any furniture from a visual grid and place it instantly; it replaces whatever sits on that furniture's own layer, so a pit (MIDDLE) and a floor covering (FLOOR) can coexist on one tile" none {} false none false true }
   }
 
 "structure_necro" modify append
   {
     { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
     { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+    { RevealLevel "Reveal level" "Dev Tools" "Reveals the whole floor the clicked tile is on -- check whether a layout generated without exploring for it" none {} false none false true }
+    { ZLevelDown "Z-level down" "Dev Tools" "Builds a down staircase instantly on the clicked tile, generating and linking the level below" none {} false none false true }
+    { ZLevelUp "Z-level up" "Dev Tools" "Builds an up staircase instantly on the clicked tile, generating and linking the level above" none {} false none false true }
+    { PlaceFurnitureNew "Place furniture" "Dev Tools" "Pick any furniture from a visual grid and place it instantly; it replaces whatever sits on that furniture's own layer, so a pit (MIDDLE) and a floor covering (FLOOR) can coexist on one tile" none {} false none false true }
   }
 
 "structure_white_knight" modify append
   {
     { PlaceMinionNew "Place minion" "Dev Tools" "Places a minion; diggers also get the WORKER tag so they dig + haul" none {} false none false true }
     { PlaceItemNew "Place item (visual)" "Dev Tools" "Pick an item from a visual grid, then choose how many" none {} false none false true }
+    { RevealLevel "Reveal level" "Dev Tools" "Reveals the whole floor the clicked tile is on -- check whether a layout generated without exploring for it" none {} false none false true }
+    { ZLevelDown "Z-level down" "Dev Tools" "Builds a down staircase instantly on the clicked tile, generating and linking the level below" none {} false none false true }
+    { ZLevelUp "Z-level up" "Dev Tools" "Builds an up staircase instantly on the clicked tile, generating and linking the level above" none {} false none false true }
+    { PlaceFurnitureNew "Place furniture" "Dev Tools" "Pick any furniture from a visual grid and place it instantly; it replaces whatever sits on that furniture's own layer, so a pit (MIDDLE) and a floor covering (FLOOR) can coexist on one tile" none {} false none false true }
   }

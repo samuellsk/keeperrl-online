@@ -1,2 +1,2 @@
-""
-""
+"Sam"
+"Adds some dev tools to quickly test stuff , also might be used for cheating if you prefer"

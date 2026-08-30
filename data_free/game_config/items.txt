@@ -2199,3 +2199,14 @@ PROTECTION_BOOK("Greenskin", "greenskin", ITEMS_PRAYERBOOKPROTECTION_SHORTNAME20
     storageIds = {"jewellery" "equipment"}
     equipmentGroup = EQUIPMENT_GROUP_JEWELLERY
   }
+
+"Abyssus_TEMP"
+  {
+    name = "temp for test"
+    viewId = { "potion1" }
+    applyVerb = "drink" "drinks"
+    weight = 1
+    price = 1
+    effect = Name "you might puke" Area 60 AddMinionTrait WORKER
+    storageIds = {"potions" "equipment"}
+  }

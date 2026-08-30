@@ -8,8 +8,7 @@
 "4_necromancer" modify {
   villainGroups = { NECRO_KEEPER NECRO_COTTAGES }
   # Put the necromancer on its own content tribe (defined in this mod's tribes.txt) instead of the default
-  # EVIL keeper tribe (DARK_KEEPER). UNDEAD_KEEPER is enemyOfAll -> no allies, hostile to everything.
+  # EVIL keeper tribe (DARK_KEEPER). NECRO_KEEPER is enemyOfAll -> no allies, hostile to everything.
   # tribeAlignment stays EVIL (it still drives the biome villain set + the RAR two-camp logic); only the
   # tribe identity + friend/foe changes.
-  tribe = UNDEAD_KEEPER
 }

@@ -21,6 +21,7 @@
 #include "attr_type.h"
 
 class Spell;
+class CreatureFactory;
 struct ItemAbility;
 
 class SpellMap {
@@ -33,6 +34,15 @@ class SpellMap {
   bool contains(const SpellId) const;
   void onExpLevelReached(Creature*, AttrType, int level);
   void setAllReady();
+  // Re-read every learned spell's DEFINITION from the content files. A learned spell is stored here as a full
+  // copy (see SpellInfo below), so editing spells.txt only changes what new casters learn -- every creature
+  // that already knows the spell keeps the version it learned, forever. Returns how many were refreshed.
+  //
+  // Only the definition is replaced: cooldown (`timeout`), `level` and `expType` are runtime state and are
+  // left exactly as they are, so nothing is re-armed or re-levelled by reloading. A spell that no longer
+  // exists in the files is left untouched rather than dropped -- removing it would strip an ability a live
+  // creature is mid-cooldown on.
+  int refreshFromFactory(const CreatureFactory&);
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version);

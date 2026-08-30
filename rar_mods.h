@@ -42,6 +42,8 @@ std::string rarHashDataFree(const std::string& dataFreePath);
 // wholesale (deleting files the bundle lacks) and leaves the rest of data_free alone; it validates the blob
 // BEFORE touching disk and returns false on a bad one, so a failed download cannot leave a broken install.
 std::string rarBundleDataFree(const std::string& dataFreePath);
+// "relpath<TAB>sha256" lines over the same protected file set -- what keeper_updater checks before launch.
+std::string rarDataFreeManifest(const std::string& dataFreePath);
 bool rarUnbundleDataFree(const std::string& dataFreePath, const std::string& bundle);
 
 // Write a release manifest: "<relative/path>\t<sha256>\t<bytes>" per line, sorted. PLAIN TEXT on purpose --

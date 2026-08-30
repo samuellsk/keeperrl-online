@@ -927,7 +927,7 @@ Def MiniPrison() {
     Border(TOP, -1, Remove("no_dig"))
   })
   Place({1 1}, Reset("floor", "prison_door"), 1, On("prison_bars"))
-  Inside(TOP, 4, Place({1 1}, Set("elf_archer"), {1 4}, On("floor")))
+  Inside(TOP, 4, Place({1 1}, Set("zlevel_ally"), {1 4}, On("floor")))
 }
 End
 

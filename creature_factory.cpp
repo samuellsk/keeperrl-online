@@ -228,21 +228,6 @@ PCreature CreatureFactory::getSokobanBoulder(TribeId tribe) {
   return ret;
 }
 
-CreatureAttributes CreatureFactory::getKrakenAttributes(ViewId id, const TString& name) {
-  return CATTR(
-      c.viewId = id;
-      c.body = Body::nonHumanoid(Body::Size::LARGE);
-      c.body->setDeathSound(none);
-      c.body->setCanBeCaptured(false);
-      c.attr[AttrType("DAMAGE")] = 28;
-      c.attr[AttrType("DEFENSE")] = 28;
-      c.canJoinCollective = false;
-      c.permanentEffects[LastingEffect::POISON_RESISTANT] = 1;
-      c.permanentEffects[LastingEffect::NIGHT_VISION] = 1;
-      c.permanentBuffs.push_back(BuffId("SWIMMING_SKILL"));
-      c.name = name;);
-}
-
 static string getSpeciesName(bool humanoid, bool large, bool living, bool wings) {
   static vector<string> names {
     "devitablex",
@@ -292,8 +277,6 @@ ViewIdList CreatureFactory::getViewId(CreatureId id) const {
     return {a->viewId};
   if (auto p = getReferenceMaybe(getSpecialParams(), id))
     return {getSpecialViewId(p->humanoid, p->large, p->living, p->wings)};
-  if (id == "KRAKEN")
-    return {ViewId("kraken_head")};
   return {ViewId("knight")};
 }
 
@@ -302,8 +285,6 @@ TString CreatureFactory::getName(CreatureId id) const {
     return a->name.bare();
   if (auto p = getReferenceMaybe(getSpecialParams(), id))
     return TString(getSpeciesName(p->humanoid, p->large, p->living, p->wings));
-  if (id == "KRAKEN")
-    return TStringId("KRAKEN");
   return TStringId("KNIGHT_NAME");
 }
 
@@ -350,13 +331,28 @@ CreatureFactory& CreatureFactory::operator =(CreatureFactory&&) = default;
 
 constexpr int maxKrakenLength = 15;
 
+// Point a creature's sprite at whatever its liquidViewId says about the ground it is standing in. Silent
+// no-op for a creature that defines no mapping, or on ground it does not mention -- so an ordinary creature
+// keeps the viewId from its own definition.
+static void applyLiquidViewId(Creature* c, Position pos) {
+  auto& mapping = c->getAttributes().liquidViewId;
+  if (mapping.empty())
+    return;
+  if (auto ground = pos.getFurniture(FurnitureLayer::GROUND))
+    if (auto id = getReferenceMaybe(mapping, ground->getType()))
+      c->modViewObject().setId(*id);
+}
+
 class KrakenController : public Monster {
   public:
-  KrakenController(Creature* c) : Monster(c, MonsterAIFactory::monster()) {
+  // tendril: which creature id this kraken grows as tentacles. Empty = the hardcoded vanilla tentacle, so
+  // the stock KRAKEN is unchanged; set from CreatureAttributes::krakenTendril for content-defined krakens.
+  KrakenController(Creature* c, optional<CreatureId> tendril = none)
+      : Monster(c, MonsterAIFactory::monster()), tendril(tendril) {
   }
 
-  KrakenController(Creature* c, WeakPointer<KrakenController> father, int length)
-      : Monster(c, MonsterAIFactory::monster()), length(length), father(father) {
+  KrakenController(Creature* c, WeakPointer<KrakenController> father, int length, optional<CreatureId> tendril)
+      : Monster(c, MonsterAIFactory::monster()), length(length), father(father), tendril(tendril) {
   }
 
   virtual bool dontReplaceInCollective() override {
@@ -445,13 +441,19 @@ class KrakenController : public Monster {
         moves.push_back(dirs.second);
       if (!moves.empty()) {
         Vec2 move = Random.choose(moves);
-        ViewId viewId = creature->getPosition().plus(move).canEnter({MovementTrait::SWIM})
-          ? ViewId("kraken_water") : ViewId("kraken_land");
-        auto attributes = CreatureFactory::getKrakenAttributes(viewId, TStringId("KRAKEN_TENTACLE"));
-        auto viewObject = attributes.createViewObject();
-        auto spawn = makeOwner<Creature>(viewObject, creature->getTribeId(), std::move(attributes), SpellMap{});
+        // The tentacle is an ordinary creatures.txt entry, built through the normal factory so it carries its
+        // own view id, attributes, body and name -- nothing about it is fabricated here any more. Its
+        // controller is then replaced with a kraken one, which is what makes it grow further and die with the
+        // head. `tendril` falls back to the vanilla tentacle for a kraken loaded from a save written before
+        // the field existed (its controller deserializes with no id).
+        auto spawn = creature->getGame()->getContentFactory()->getCreatures().fromId(
+            tendril.value_or(CreatureId("KRAKEN_TENTACLE")), creature->getTribeId());
+        // Sprite by the liquid it grew into (liquidViewId in creatures.txt). The vanilla tentacle used to get
+        // this from a hardcoded water/land test here; it is content now, and a tentacle whose definition says
+        // nothing about the ground simply keeps its own sprite.
+        applyLiquidViewId(spawn.get(), creature->getPosition().plus(move));
         spawn->setController(makeOwner<KrakenController>(spawn.get(), getThis().dynamicCast<KrakenController>(),
-            length + 1));
+            length + 1, tendril));
         spawns.push_back(spawn.get());
         creature->getPosition().plus(move).addCreature(std::move(spawn));
       }
@@ -459,6 +461,9 @@ class KrakenController : public Monster {
   }
 
   virtual void makeMove() override {
+    // Covers the head as well as tentacles: whatever it is standing in decides its sprite, re-checked as it
+    // acts so a changing pool (water frozen, magma cooled) is reflected.
+    applyLiquidViewId(creature, creature->getPosition());
     for (Creature* c : spawns)
       if (c->isDead()) {
         spawns.removeElement(c);
@@ -477,7 +482,14 @@ class KrakenController : public Monster {
     creature->wait().perform(creature);
   }
 
-  SERIALIZE_ALL(SUBCLASS(Monster), ready, spawns, father, length)
+  template <class Archive>
+  void serialize(Archive& ar, const unsigned int version) {
+    ar(SUBCLASS(Monster), ready, spawns, father, length);
+    // Version 1: which creature to grow. Appending to the line above would change the layout of every save
+    // and villain blob that holds a kraken.
+    if (version >= 1)
+      ar(tendril);
+  }
   SERIALIZATION_CONSTRUCTOR(KrakenController)
 
   private:
@@ -485,7 +497,13 @@ class KrakenController : public Monster {
   bool SERIAL(ready) = false;
   vector<Creature*> SERIAL(spawns);
   WeakPointer<KrakenController> SERIAL(father);
+  optional<CreatureId> SERIAL(tendril);
 };
+
+// Version 1 = the class knows which creature to grow. Without this the class stays at the default version 0,
+// the `version >= 1` branch in serialize never runs, and a content-defined kraken would forget its tendril on
+// save/load -- silently reverting to the vanilla tentacle.
+CEREAL_CLASS_VERSION(KrakenController, 1)
 
 namespace {
 class ShopkeeperController : public Monster, public EventListener<ShopkeeperController> {
@@ -837,10 +855,6 @@ CreatureAttributes CreatureFactory::getAttributesFromId(CreatureId id) {
     if (auto ret = getValueMaybe(attributes, id)) {
       ret->name.generateFirst(&*nameGenerator);
       return std::move(*ret);
-    } else if (id == "KRAKEN") {
-      auto ret = getKrakenAttributes(ViewId("kraken_head"), TStringId("KRAKEN"));
-      ret.killedAchievement = AchievementId("killed_kraken");
-      return ret;
     }
     FATAL << "Unrecognized creature type: \"" << id << "\"";
     fail();
@@ -849,13 +863,15 @@ CreatureAttributes CreatureFactory::getAttributesFromId(CreatureId id) {
   return ret;
 }
 
-ControllerFactory getController(CreatureId id, MonsterAIFactory normalFactory) {
-  if (id == "KRAKEN")
-    return ControllerFactory([=](Creature* c) {
-        return makeOwner<KrakenController>(c);
+// `attr` is the creature being built, so a CONTENT-defined kraken is recognised by its krakenTendril field
+// rather than by a hardcoded id. The literal "KRAKEN" check stays for the vanilla one, whose attributes are
+// fabricated in code and never pass through creatures.txt.
+ControllerFactory getController(CreatureId id, const CreatureAttributes& attr, MonsterAIFactory normalFactory) {
+  if (auto tendril = attr.krakenTendril)
+    return ControllerFactory([tendril](Creature* c) {
+        return makeOwner<KrakenController>(c, tendril);
         });
-  else
-    return Monster::getFactory(normalFactory);
+  return Monster::getFactory(normalFactory);
 }
 
 const map<CreatureId, CreatureFactory::SpecialParams>& CreatureFactory::getSpecialParams() {
@@ -904,7 +920,10 @@ PCreature CreatureFactory::getSpirit(TribeId tribe, MonsterAIFactory aiFactory) 
   auto id = CreatureId("SPIRIT");
   auto attr = getAttributesFromId(id);
   auto spells = getSpellMap(attr);
-  auto ret = get(std::move(attr), tribe, getController(id, aiFactory), std::move(spells));
+  // Sequenced deliberately: getController READS attr, and std::move(attr) in the same call expression would
+  // be unsequenced against it -- the attributes could be gutted before the controller looks at them.
+  auto controller = getController(id, attr, aiFactory);
+  auto ret = get(std::move(attr), tribe, std::move(controller), std::move(spells));
   ret->modViewObject().setModifier(ViewObject::Modifier::ILLUSION);
   ret->getAttributes().getName() = orig->getAttributes().getName();
   ret->getAttributes().getName().setFirst(none);
@@ -934,7 +953,8 @@ PCreature CreatureFactory::get(CreatureId id, TribeId tribe, MonsterAIFactory ai
   else {
     auto attr = getAttributesFromId(id);
     auto spells = getSpellMap(attr);
-    return get(std::move(attr), tribe, getController(id, aiFactory), std::move(spells));
+    auto controller = getController(id, attr, aiFactory);   // see the note above: must read attr before it moves
+    return get(std::move(attr), tribe, std::move(controller), std::move(spells));
   }
 }
 

@@ -2,7 +2,7 @@
 {
   settlement = {
     type = RandomLayout { "z_level_vault" { 80 80 } "z_level_vampire_vault" }
-    tribe = UNDEAD_KEEPER
+    tribe = NECRO_KEEPER
     inhabitants = {
       fighters = {
         count = 4
@@ -16,7 +16,7 @@
 {
   settlement = {
     type = RandomLayout { "z_level_castle" { 80 80 } "default" }
-    tribe = UNDEAD_KEEPER
+    tribe = NECRO_KEEPER
     inhabitants = {
       fighters = {
         count = {50}

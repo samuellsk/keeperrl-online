@@ -1,5 +1,0 @@
-"UNDEAD_KEEPER" {
-  diplomatic = false
-  enemyOfAll = true
-  keeperTribe = true
-}

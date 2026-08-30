@@ -78,6 +78,7 @@
   }
   workshopGroups = { "church" "holy_weapons" "scriptorium" }
   description = KEEPER_CREATURES_DESCRIPTION2
+  tribe = CHURCH_KEEPER
 }
 "3_zmother" inherit "3_zchurch"
 {
@@ -109,6 +110,7 @@
   flags = { "abomination_upgrades" }
   prisoners = false
   requireQuartersForExp = false
+  tribe = NECRO_KEEPER
 }
 "5_gnomes"
 {
@@ -137,6 +139,7 @@
   noLeader = true
   prisoners = false
   requireQuartersForExp = false
+  tribe = GNOME_KEEPER
 }
 "6_dwarves"
 {
@@ -165,6 +168,7 @@
   populationString = KEEPER_CREATURES_POPULATIONSTRING1
   noLeader = true
   prisoners = false
+  tribe = DWARF_KEEPER
 }
 "7_goblins"
 {
@@ -188,6 +192,7 @@
   workshopGroups = { "basic" "bows" }
   description = KEEPER_CREATURES_DESCRIPTION6
   unlock = "goblins"
+  tribe = GOBLIN_KEEPER
 }
 "8_zombies"
 {
@@ -214,6 +219,7 @@
   prisoners = false
   immigrantInterval = 40
   unlock = "zombies"
+  tribe = ZOMBIE_KEEPER
 }
 "9_cyclops"
 {
@@ -239,6 +245,7 @@
   maxPopulation = 1
   prisoners = false
   unlock = "cyclops"
+  tribe = CYCLOPS_KEEPER
 }
 
 "91_dark_mage_adventurer"

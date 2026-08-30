@@ -48,6 +48,12 @@ struct BuffInfo {
   optional<TString> SERIAL(hatedGroupName);
   double SERIAL(defenseMultiplier) = 1.0;
   optional<AttrType> SERIAL(defenseMultiplierAttr);
+  // The attacking mirror of the pair above. Scales the damage a creature DEALS at the moment the blow is
+  // rolled, leaving the displayed attribute untouched -- a creature with DAMAGE 100 under a 1.3 buff still
+  // reads 100 on its sheet and hits for 130. Optional attr restricts it to one damage type, exactly as
+  // defenseMultiplierAttr does; unset means every type.
+  double SERIAL(damageMultiplier) = 1.0;
+  optional<AttrType> SERIAL(damageMultiplierAttr);
   FXVariantName SERIAL(fx) = FXVariantName::BUFF_RED;
   optional<pair<AttrType, AttrType>> SERIAL(modifyDamageAttr);
   optional<SpecialAttr> SERIAL(specialAttr);
@@ -56,4 +62,4 @@ struct BuffInfo {
   void serialize(Archive& ar1, const unsigned int);
 };
 
-CEREAL_CLASS_VERSION(BuffInfo, 2)
+CEREAL_CLASS_VERSION(BuffInfo, 3)

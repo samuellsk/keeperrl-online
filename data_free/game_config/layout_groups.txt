@@ -1,0 +1,38 @@
+# Tribe-dependent creature pools for layout tokens.
+#
+# A layout token like "elf_archer" maps (in layout_mapping.txt) to an action such as
+#
+#   "elf_archer" AlliedPrisoner "ELF_ARCHER"
+#
+# which hands EVERY keeper the same creature -- a necromancer freeing an elf archer out of his own prison.
+# The token cannot change (it is baked into random_layouts.txt and into every mod that uses it), so the
+# indirection goes behind it: point the action at a GROUP defined here instead of at a creature, and the group
+# answers differently depending on the player's keeper tribe.
+#
+#   "elf_archer" AlliedPrisoner "ALLY_GROUP_1"      <- in a mod's layout_mapping.txt
+#
+# RULES
+# - A name is looked up here FIRST. If it isn't a group, it is used as a creature id exactly as before, so
+#   vanilla content and old mods keep working untouched.
+# - Entries are matched against the player's keeper tribe. The FIRST entry whose tribe matches wins.
+# - An entry with NO tribe is the default: used when nothing matches. Without one, a keeper tribe that has no
+#   entry gets nothing placed (and a line in the log) rather than a creature that makes no sense for it.
+# - One creature is picked at random from the matching entry's list.
+# - Only maps generated for a KNOWN keeper can match a tribe -- your own z-levels. Pre-generated villain
+#   interiors have no keeper, so a group used there always takes the default entry.
+#
+# EXAMPLE (this file ships empty on purpose -- vanilla keeps its fixed creatures):
+#
+"ALLY_ZLEVEL_GROUP" {
+  { tribe = "DARK_KEEPER"  creatures = { "DARK_ELF_WARRIOR" "GOBLIN_WARRIOR" "HARPY" "VAMPIRE" "GOBLIN_PRIEST" "GOBLIN_WIZARD" "GOBLIN_SHAMAN" "ZOMBIE" "SKELETON_ARCHER" "MUMMY" "WEREWOLF" } }
+  { tribe = "GOBLIN_KEEPER"  creatures = { "GOBLIN_WARRIOR" "GOBLIN_SHAMAN" "GOBLIN_ARTIFICER" "GOBLIN_MATRON" "GOBLIN_PRIEST" "GOBLIN_WIZARD" "GOBLIN_ARCHER" "GOBLIN_GUARD" "GOBLIN_CHICKENMANCER" "TROLL" } }
+  { tribe = "WHITE_KEEPER" creatures = { "SQUIRE_PLAYER" "ARCHER_PLAYER" "JESTER" "CLERIC" "PRIEST_PLAYER" "DWARF_BLACKSMITH" "KNIGHT_PLAYER" "TEUTON" "TEUTON_BOSS" "DUKE" "FRIAR" } }
+  { tribe = "CHURCH_KEEPER" creatures = { "ARMED_BROTHER" "PRIEST_DIVINITY" "ARTISAN" "PROSTITUTE" "GIGOLO" "WARRIOR_NUN" } }
+  { tribe = "GNOME_KEEPER" creatures = { "GNOME" "GNOME" "GNOME" "GNOME" "GNOME" "GNOME" "GNOME" "GNOME" "GNOME" "GNOME" "GNOME" "GNOME" "GNOME_CHIEF" } }
+  { tribe = "DWARF_KEEPER" creatures = { "DWARF_FIGHTER" "DWARF_FIGHTER" "DWARF_FIGHTER" "DWARF_FIGHTER" "DWARF_FIGHTER" "DWARF_FEMALE" "DWARF_FEMALE" "DWARF_FIGHTER" "DWARF_BLACKSMITH" "DWARF_BLACKSMITH" "DWARF_FIGHTER" "DWARF_FIGHTER" "DWARF_BARON" } }
+  { tribe = "ZOMBIE_KEEPER" creatures = { "ZOMBIE" } }
+  { tribe = "NECRO_KEEPER" creatures = { "ZOMBIE" "VAMPIRE_BRUTE" } }
+  { tribe = "CYCLOPS_KEEPER" creatures = { "ELF_ARCHER" } }
+  { creatures = { "ELF_ARCHER" } }
+}
+

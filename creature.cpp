@@ -1664,10 +1664,13 @@ CreatureAction Creature::attack(Creature* other) const {
     for (auto weapon : weapons) {
       auto weaponInfo = weapon.first->getWeaponInfo();
       auto damageAttr = weaponInfo.meleeAttackAttr;
-      const int damage = max(1, int(weapon.second * (getAttr(damageAttr, false) +
+      int damage = max(1, int(weapon.second * (getAttr(damageAttr, false) +
           getSpecialAttr(damageAttr, other) + weapon.first->getModifier(damageAttr))));
       AttackLevel attackLevel = Random.choose(getBody().getAttackLevels());
       damageAttr = modifyDamageAttr(damageAttr, getGame()->getContentFactory());
+      // After modifyDamageAttr, so a buff restricted by damageMultiplierAttr is matched against the type the
+      // blow actually lands as -- the same value defenseMultiplierAttr is compared against on the other side.
+      damage = max(1, int(damage * getBuffDamageMultiplier(damageAttr)));
       vector<Effect> victimEffects;
       for (auto& e : weaponInfo.victimEffect)
         if (Random.chance(e.chance))
@@ -2197,6 +2200,24 @@ void Creature::increaseExpLevel(AttrType type, double increase) {
   }
 }
 
+// The attacking mirror of the defenseMultiplier loop in takeDamage: walk this creature's buffs (temporary AND
+// permanent, same as defense does) and multiply their damage multipliers together. Applied to the rolled blow
+// only -- getAttr is untouched, so the character sheet still shows the base number.
+double Creature::getBuffDamageMultiplier(AttrType damageType) const {
+  double ret = 1.0;
+  auto factory = getGame()->getContentFactory();
+  auto modify = [&](BuffId id) {
+    auto& info = factory->buffs.at(id);
+    if (!info.damageMultiplierAttr || info.damageMultiplierAttr == damageType)
+      ret *= info.damageMultiplier;
+  };
+  for (auto& buff : buffs)
+    modify(buff.first);
+  for (auto& buff : buffPermanentCount)
+    modify(buff.first);
+  return ret;
+}
+
 BestAttack Creature::getBestAttack(const ContentFactory* factory) const {
   return getBestAttackWithExp(factory, getCombatExperience(true, true));
 }
@@ -2560,6 +2581,8 @@ CreatureAction Creature::throwItem(Item* item, Position target, bool isFriendlyA
   if (!dist)
     return CreatureAction(TSentence("ITEM_TOO_HEAVY", item->getTheName()));
   int damage = getAttr(AttrType("RANGED_DAMAGE")) + item->getModifier(AttrType("RANGED_DAMAGE"));
+  // Thrown/fired blows land as AttrType("DAMAGE") (see the Attack built below), so match on that.
+  damage = max(1, int(damage * getBuffDamageMultiplier(AttrType("DAMAGE"))));
   return CreatureAction(this, [=](Creature* self) {
     Attack attack(isFriendlyAI ? nullptr : self, Random.choose(getBody().getAttackLevels()),
         item->getWeaponInfo().attackType, damage, AttrType("DAMAGE"));
@@ -2874,6 +2897,17 @@ const vector<Creature*>& Creature::getVisibleCreatures() const {
 bool Creature::shouldAIAttack(const Creature* other) const {
   if (isAffected(LastingEffect::PANIC) || getStatus().contains(CreatureStatus::CIVILIAN))
     return false;
+  // A TIMED summon is expendable and fights whatever it is pointed at. Without this it falls through to the
+  // damage comparison below, so a summon weaker than its target runs away instead -- which is the opposite of
+  // what summoning it was for, and it expires shortly anyway.
+  //
+  // Keyed on the SUMMONED effect, not on having the Summoned AI behaviour: companions share that same
+  // behaviour (both go through MonsterAIFactory::summoned) but are created with ttl = none, so only real
+  // timed summons carry this effect. Companions are permanent and keep their ordinary self-preservation.
+  //
+  // PANIC above still wins: that is a deliberate debuff somebody cast, and it should keep working.
+  if (isAffected(LastingEffect::SUMMONED))
+    return true;
   return LastingEffects::doesntMove(other)
       || attributes->getAIType() == AIType::MELEE
       || getDefaultWeaponDamage() > other->getDefaultWeaponDamage();

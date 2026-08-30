@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>   // std::find, for append_after
+
 #include "extern/iomanip.h"
 #include "util.h"
 
@@ -239,24 +241,106 @@ struct PrettyFlag {
 
 void serialize(PrettyInputArchive& ar, PrettyFlag& c);
 
+// Index of an element, for STRING lists only. The vector serializer below is instantiated for every vector in
+// the game's config, and most element types cannot be compared at all -- and SFINAE does not save us, because
+// std::pair declares operator== for everything and only fails deep inside instantiation. Tag dispatch keeps
+// the comparison from ever being instantiated for those, at the cost of restricting `append_after` to lists of
+// strings. That is exactly what the ordered lists are: buildingGroups, workshopGroups, zLevelGroups, technology.
+template <typename T>
+void insertAfterImpl(PrettyInputArchive& ar1, vector<T>& v, const T& anchor, const vector<T>& inserted,
+    std::true_type) {
+  auto index = v.findElement(anchor);
+  if (!index)
+    ar1.error("append_after: no such element to insert after");
+  v.insert(*index + 1, inserted);
+}
+
+// Non-string element types never reach the comparison OR the copy -- both would fail to compile for the many
+// config types that are not comparable (std::pair) or not copyable (ScriptedUI).
+template <typename T>
+void insertAfterImpl(PrettyInputArchive& ar1, vector<T>&, const T&, const vector<T>&, std::false_type) {
+  ar1.error("append_after only works on lists of quoted names");
+}
+
+template <typename T>
+void insertAfter(PrettyInputArchive& ar1, vector<T>& v, const T& anchor, const vector<T>& inserted) {
+  insertAfterImpl(ar1, v, anchor, inserted, std::integral_constant<bool, std::is_same<T, string>::value>());
+}
+
+template <typename T>
+void replaceElemImpl(PrettyInputArchive& ar1, vector<T>& v, const T& anchor, const vector<T>& replacement,
+    std::true_type) {
+  auto index = v.findElement(anchor);
+  if (!index)
+    ar1.error("replace: no such element to replace");
+  // Order-preserving: removeIndex swaps the last element into the hole, which would silently shuffle the list
+  // -- and for buildingGroups the list IS the menu order, so that would move an unrelated group.
+  v.removeIndexPreserveOrder(*index);
+  v.insert(*index, replacement);
+}
+
+template <typename T>
+void replaceElemImpl(PrettyInputArchive& ar1, vector<T>&, const T&, const vector<T>&, std::false_type) {
+  ar1.error("replace only works on lists of quoted names");
+}
+
+template <typename T>
+void replaceElem(PrettyInputArchive& ar1, vector<T>& v, const T& anchor, const vector<T>& replacement) {
+  replaceElemImpl(ar1, v, anchor, replacement, std::integral_constant<bool, std::is_same<T, string>::value>());
+}
+
 template <typename T>
 inline void serializeVecImpl(PrettyInputArchive& ar1, vector<T>& v, BracketType bracketType) {
-  if (!ar1.eatMaybe("append"))
+  // POSITION, not just membership. `append` puts new entries at the END, which is wrong when the list is an
+  // ORDER: a keeper's buildingGroups drives the build menu, and the menu starts a new left-hand entry every
+  // time the group changes from the previous button. So a mod group that renders as "Installations" but sits
+  // at the end produces a SECOND "Installations" entry rather than joining the existing one -- the rendered
+  // names are already merged, but only adjacent buttons collapse into one section.
+  //
+  //     buildingGroups = append_after "installations" { "goblin_scout" }
+  //
+  // reads the anchor, then inserts the new entries directly after it. A missing anchor is an ERROR, not a
+  // silent append to the end: the whole point is the position, so quietly landing somewhere else would
+  // reintroduce exactly the bug this avoids.
+  //     buildingGroups = replace "magical_installations" { "magical_installations_necro" }
+  //
+  // swaps one entry for another IN PLACE, keeping its position -- which is what a themed variant of a group
+  // needs: the necromancer's version of a menu section should sit exactly where the original did.
+  optional<T> anchor;
+  bool replacing = false;
+  if (ar1.eatMaybe("append_after")) {
+    T a;
+    ar1(a);
+    anchor = std::move(a);
+  } else if (ar1.eatMaybe("replace")) {
+    T a;
+    ar1(a);
+    anchor = std::move(a);
+    replacing = true;
+  } else if (!ar1.eatMaybe("append"))
     v.clear();
+  vector<T> inserted;
+  vector<T>& target = anchor ? inserted : v;
   if (!ar1.isOpenBracket(bracketType)) {
     T t;
     ar1(t);
-    v.push_back(std::move(t));
+    target.push_back(std::move(t));
   } else {
     ar1.openBracket(bracketType);
     while (!ar1.isCloseBracket(bracketType)) {
       T t;
       ar1(t);
-      v.push_back(std::move(t));
+      target.push_back(std::move(t));
       if (bracketType == BracketType::ROUND && !ar1.isCloseBracket(bracketType))
         ar1.eat(",");
     }
     ar1.closeBracket(bracketType);
+  }
+  if (anchor) {
+    if (replacing)
+      replaceElem(ar1, v, *anchor, inserted);
+    else
+      insertAfter(ar1, v, *anchor, inserted);
   }
 }
 

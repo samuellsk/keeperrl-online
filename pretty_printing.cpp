@@ -26,6 +26,7 @@
 #include "spell_map.h"
 #include "view_object.h"
 #include "z_level_info.h"
+#include "layout_group.h"
 #include "resource_counts.h"
 #include "creature_inventory.h"
 #include "campaign_type.h"
@@ -109,6 +110,7 @@ ADD_IMP(map<PrimaryId<BiomeId>, BiomeInfo>)
 ADD_IMP(map<PrimaryId<WorkshopType>, WorkshopInfo>)
 ADD_IMP(map<PrimaryId<LayoutMappingId>, LayoutMapping>)
 ADD_IMP(map<PrimaryId<RandomLayoutId>, LayoutGenerator>)
+ADD_IMP(map<string, vector<LayoutGroupEntry>>)
 ADD_IMP(map<string, CampaignInfo>)
 ADD_IMP(map<PrimaryId<NameGeneratorId>, vector<string>>)
 ADD_IMP(vector<pair<PrimaryId<CollectiveResourceId>, ResourceInfo>>)

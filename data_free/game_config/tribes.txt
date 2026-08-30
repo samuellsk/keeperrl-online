@@ -34,11 +34,50 @@
   enemyOfAll = true
   allies = { "DARK_ELF" "GNOME" "GREENSKIN" "PEACEFUL" }
 }
+"GOBLIN_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
+  allies = { "DARK_ELF" "GNOME" "GREENSKIN" "PEACEFUL" }
+}
 "WHITE_KEEPER" {
   diplomatic = false
   keeperTribe = true
   enemyOfAll = true
   allies = { "DWARF" "ELF" "GNOME" "HUMAN" "PEACEFUL" }
+}
+"CHURCH_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
+  allies = { "DWARF" "ELF" "GNOME" "HUMAN" "PEACEFUL" }
+}
+"DWARF_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
+  allies = { "DWARF" "ELF" "GNOME" "HUMAN" "PEACEFUL" }
+}
+"GNOME_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
+  allies = { "DWARF" "ELF" "GNOME" "HUMAN" "PEACEFUL" }
+}
+"NECRO_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
+}
+"ZOMBIE_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
+}
+"CYCLOPS_KEEPER" {
+  diplomatic = false
+  keeperTribe = true
+  enemyOfAll = true
 }
 "RETIRED_KEEPER" {
   diplomatic = false
